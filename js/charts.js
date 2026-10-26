@@ -1,5 +1,5 @@
 // Gráficas de Stats con Chart.js (colores tomados del tema activo).
-import { monthSeries, yearSeries, capitalSeries, winRate } from "./logic.js";
+import { monthSeries, yearSeries, capitalSeries, winRate, flowStats } from "./logic.js";
 
 const MONTHS = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
 const charts = {};
@@ -55,7 +55,7 @@ function baseOptions(t) {
 
 const fmt = (n) => n.toLocaleString("es-MX");
 
-export function renderCharts(records, todayKey) {
+export function renderCharts(records, todayKey, movements = []) {
   if (typeof Chart === "undefined") return;
   const t = theme();
   Chart.defaults.font.family = "VT323";
@@ -65,7 +65,7 @@ export function renderCharts(records, todayKey) {
     const id = "chCapital";
     destroy(id);
     const cv = document.getElementById(id);
-    const s = capitalSeries(records);
+    const s = capitalSeries(records, movements);
     setEmpty(cv, s.length < 2);
     if (s.length >= 2) {
       const o = baseOptions(t);
@@ -76,7 +76,11 @@ export function renderCharts(records, todayKey) {
           const p = s[items[0].dataIndex];
           return p.start ? "INICIO" : new Date(p.ts).toLocaleString("es-MX", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
         },
-        label: (item) => `${fmt(item.parsed.y)} Coins`,
+        label: (item) => {
+          const p = s[item.dataIndex];
+          const tag = p.movement === "deposit" ? ` (abono +${fmt(p.flow)})` : p.movement === "withdraw" ? ` (retiro −${fmt(-p.flow)})` : "";
+          return `${fmt(item.parsed.y)} Coins${tag}`;
+        },
       };
       charts[id] = new Chart(cv, {
         type: "line",
@@ -85,9 +89,13 @@ export function renderCharts(records, todayKey) {
           datasets: [{
             data: s.map((p) => p.value),
             borderColor: t.red, borderWidth: 2, tension: 0.25,
-            pointRadius: s.length > 40 ? 0 : 3, pointStyle: "rect",
-            pointBackgroundColor: s.map((p) => (p.result === "lose" ? t.silver : t.red)),
-            pointBorderColor: s.map((p) => (p.result === "lose" ? t.silver : t.red)),
+            // rondas: cuadros (ocultos si hay muchas); abonos/retiros: triángulos siempre visibles
+            pointRadius: s.map((p) => (p.movement ? 6 : s.length > 40 ? 0 : 3)),
+            pointStyle: s.map((p) => (p.movement === "deposit" ? "triangle" : p.movement === "withdraw" ? "triangle" : "rect")),
+            pointRotation: s.map((p) => (p.movement === "withdraw" ? 180 : 0)),
+            pointBackgroundColor: s.map((p) => (p.movement === "deposit" ? t.silver : p.movement === "withdraw" ? t.bg : p.result === "lose" ? t.silver : t.red)),
+            pointBorderColor: s.map((p) => (p.movement === "deposit" ? t.text : p.movement ? t.red : p.result === "lose" ? t.silver : t.red)),
+            pointBorderWidth: s.map((p) => (p.movement ? 2 : 1)),
             fill: true,
             backgroundColor: (ctx) => {
               const { chart } = ctx;
@@ -176,6 +184,43 @@ export function renderCharts(records, todayKey) {
             borderColor: t.red, borderWidth: 1, borderSkipped: false,
             barPercentage: 0.8, categoryPercentage: 0.9,
           }],
+        },
+        options: o,
+      });
+    }
+  }
+
+  // --- Abonos vs retiros por mes (año actual) ---
+  {
+    const id = "chFlows";
+    destroy(id);
+    const cv = document.getElementById(id);
+    const f = flowStats(movements, todayKey);
+    const any = f.byMonth.some((m) => m.deposit || m.withdraw);
+    cv.closest(".chart-box").dataset.empty = "SIN ABONOS NI RETIROS ESTE AÑO";
+    setEmpty(cv, !any);
+    if (any) {
+      const o = baseOptions(t);
+      o.scales.x.grid.display = false;
+      o.scales.x.ticks.font = { family: "VT323", size: 14 };
+      o.scales.x.ticks.autoSkip = false;
+      o.scales.x.ticks.maxRotation = 0;
+      o.scales.y.beginAtZero = true;
+      o.scales.y.ticks.callback = (v) => fmt(v);
+      o.plugins.legend = { display: true, position: "top", align: "end", labels: { color: t.dim, boxWidth: 12, boxHeight: 12, font: { family: "VT323", size: 17 } } };
+      o.plugins.tooltip.displayColors = true;
+      o.plugins.tooltip.callbacks = {
+        title: (items) => MONTHS[items[0].dataIndex],
+        label: (item) => `${item.dataset.label}: ${fmt(item.parsed.y)} Coins`,
+      };
+      charts[id] = new Chart(cv, {
+        type: "bar",
+        data: {
+          labels: MONTHS.map((mm) => mm.slice(0, 1)),
+          datasets: [
+            { label: "ABONOS", data: f.byMonth.map((m) => m.deposit), backgroundColor: t.silver, borderColor: t.silver, borderWidth: 1, barPercentage: 0.9, categoryPercentage: 0.8 },
+            { label: "RETIROS", data: f.byMonth.map((m) => m.withdraw), backgroundColor: t.red, borderColor: t.red, borderWidth: 1, barPercentage: 0.9, categoryPercentage: 0.8 },
+          ],
         },
         options: o,
       });

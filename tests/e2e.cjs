@@ -29,7 +29,34 @@ const assert = (c, m) => { if (!c) { console.log("✗", m); process.exitCode = 1
   assert(/^\d\d:\d\d:\d\d$/.test(await page.textContent("#lockCountdown")), "cuenta regresiva hh:mm:ss");
   const capLocked = await page.inputValue("#inCapital");
 
+  // Abonar / retirar estando bloqueado: permitido y no cambia vidas ni win rate
+  const wrBefore = await page.evaluate(() => window.__winrate.state.records.length);
+  await page.click("#btnWithdraw");
+  await page.fill("#mf_amount", "999999");
+  await page.click(".modal-btns .primary");
+  assert(await page.isVisible("#modalErr"), "no permite retirar más que el capital");
+  await page.fill("#mf_amount", "100");
+  await page.fill("#mf_note", "skin");
+  await page.click(".modal-btns .primary");
+  await page.waitForTimeout(900);
+  assert(Number(await page.inputValue("#inCapital")) === Number(capLocked) - 100, "retiro resta 100 al capital");
+  await page.click("#btnDeposit");
+  await page.fill("#mf_amount", "250");
+  await page.click(".modal-btns .primary");
+  await page.waitForTimeout(900);
+  assert(Number(await page.inputValue("#inCapital")) === Number(capLocked) + 150, "abono suma 250 al capital");
+  assert(await page.isVisible("#lockPanel"), "sigue bloqueado tras abonar/retirar");
+  assert((await page.evaluate(() => window.__winrate.state.records.length)) === wrBefore, "abonos/retiros no crean rondas");
   await page.click('[data-tab="winrate"]');
+  assert((await page.textContent("#wrTotal")) === "3", "win rate sigue contando 3 rondas");
+  assert((await page.$$(".rec.move")).length === 2, "historial muestra 2 movimientos");
+  await page.click('[data-filter="rounds"]');
+  assert((await page.$$(".rec.move")).length === 0 && (await page.$$(".rec")).length === 3, "filtro RONDAS");
+  await page.click('[data-filter="all"]');
+  // UNDO deshace los movimientos primero (son los más recientes)
+  for (let i = 0; i < 2; i++) { await page.click(".rec-undo"); await page.click(".modal-btns .primary"); await page.waitForTimeout(900); }
+  assert((await page.$$(".rec.move")).length === 0, "UNDO quitó los 2 movimientos");
+  assert(await page.inputValue("#inCapital") === capLocked, "capital regresó a " + capLocked);
   assert((await page.$$(".rec-undo")).length === 1, "UNDO solo en el registro más reciente");
   await page.click(".rec-undo");
   await page.click(".modal-btns .primary");
@@ -40,7 +67,12 @@ const assert = (c, m) => { if (!c) { console.log("✗", m); process.exitCode = 1
   const st = await page.evaluate(() => window.__winrate.state);
   assert(st.records.length === 2 && String(st.settings.capital) === (await page.inputValue("#inCapital")) && st.settings.capital === st.records[1].capitalAfter, `capital regresó a ${st.settings.capital} (antes ${capLocked})`);
 
-  // Export
+  // Export (con un retiro incluido)
+  await page.click("#btnWithdraw");
+  await page.fill("#mf_amount", "40");
+  await page.fill("#mf_note", "emote");
+  await page.click(".modal-btns .primary");
+  await page.waitForTimeout(300);
   await page.click("#btnSettings");
   const [dl] = await Promise.all([page.waitForEvent("download"), page.click("#btnExport")]);
   const fname = dl.suggestedFilename();
@@ -65,7 +97,7 @@ const assert = (c, m) => { if (!c) { console.log("✗", m); process.exitCode = 1
   await page.click(".modal-btns .primary");
   await page.waitForTimeout(300);
   const after = await page.evaluate(() => window.__winrate.state);
-  assert(JSON.stringify({ schemaVersion: exported.schemaVersion, settings: exported.settings, records: exported.records }) === JSON.stringify(after), "import → estado idéntico al exportado");
+  assert(exported.movements.length === 1 && JSON.stringify({ schemaVersion: exported.schemaVersion, settings: exported.settings, records: exported.records, movements: exported.movements }) === JSON.stringify(after), "import → estado idéntico al exportado");
   // Import inválido
   fs.writeFileSync(file + ".bad.json", JSON.stringify({ schemaVersion: 99, settings: {}, records: [] }));
   await page.click("#btnSettings").catch(() => {});

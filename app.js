@@ -2,7 +2,7 @@
 import {
   APP_VERSION, SCHEMA_VERSION, RATIO_PRESETS, PHRASES, MAX_LOSSES_PER_DAY,
   defaultState, toInt, calcProjection, parseRatio, formatRatio, dayKey, lockStatus, addDays,
-  recordResult, undoLast, pickPhraseIndex, exportState, validateImport, localDateKey,
+  recordResult, recordMovement, undoLast, lastEntry, flowStats, pickPhraseIndex, exportState, validateImport, localDateKey,
   winRate, dayRecords, groupBy, sumDelta, averages, streaks, drawdown, bestWorstDay, heatmap, weekday,
 } from "./js/logic.js";
 import { loadState, saveState, clearState } from "./js/storage.js";
@@ -35,6 +35,7 @@ let lastLock = null;
 let shownInvest = null;
 const lastPhrase = {};
 let newRecordId = null;
+let histFilter = "all";
 
 function commit(next) {
   state = next;
@@ -240,7 +241,66 @@ async function onResult(result) {
   if (scenario === "lock") $("lockPanel").scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
+// ---------------- Abonar / retirar ----------------
+async function onMovement(type) {
+  sfx.click();
+  const isDep = type === "deposit";
+  const capital = Number.isFinite(toInt(state.settings.capital)) ? toInt(state.settings.capital) : 0;
+  const res = await openModal({
+    variant: isDep ? "lose" : "win",
+    tag: isDep ? "ABONAR COINS" : "RETIRAR COINS",
+    text: isDep ? "¿Cuántas Coins compraste para abonar a tu capital?" : "¿Cuántas Coins retiras para comprar en la tienda?",
+    sub: `Capital actual: ${fmt(capital)} Coins · no afecta tu win rate`,
+    fields: [
+      { id: "amount", label: "CANTIDAD (COINS)", placeholder: isDep ? "500" : String(Math.max(1, Math.floor(capital / 2))), inputmode: "numeric", big: true },
+      { id: "note", label: "NOTA (OPCIONAL)", placeholder: isDep ? "recarga" : "skin, pase...", maxlength: 40 },
+    ],
+    validate: (v) => {
+      if (!/^\d+$/.test(v.amount) || parseInt(v.amount, 10) <= 0) return "Escribe una cantidad entera mayor a 0.";
+      if (!isDep && parseInt(v.amount, 10) > capital) return `No puedes retirar más de tu capital (${fmt(capital)}).`;
+      return null;
+    },
+    buttons: [{ label: "CANCELAR", value: false }, { label: isDep ? "ABONAR" : "RETIRAR", value: true, primary: true }],
+  });
+  if (!res?.value) return;
+  const r = recordMovement(state, type, parseInt(res.fields.amount, 10), Date.now(), res.fields.note);
+  if (!r.ok) return;
+  commit(r.state);
+  newRecordId = r.movement.id;
+  sfx.coin();
+  animateNumber(capital, r.movement.capitalAfter, (v) => {
+    if (document.activeElement !== $("inCapital")) $("inCapital").value = v;
+  });
+  const btn = isDep ? $("btnDeposit") : $("btnWithdraw");
+  const rect = btn.getBoundingClientRect();
+  const cs = getComputedStyle(document.documentElement);
+  burst(rect.left + rect.width / 2, rect.top, isDep ? ["#ffffff", cs.getPropertyValue("--silver").trim()] : [cs.getPropertyValue("--red").trim(), "#ffffff"], 40);
+  renderCalc({ syncInputs: false });
+  renderWinRate();
+}
+
 // ---------------- Win-Rate ----------------
+function recordCard(r, lastId) {
+  return `<div class="hud rec ${r.result}${r.id === newRecordId ? " is-new" : ""}">
+        <div class="badge ${r.result}">${r.result === "win" ? "WIN" : "LOSE"}</div>
+        <div class="rec-time">${timeLabel(r.ts)}</div>
+        <div class="rec-delta">${signed(r.delta)}</div>
+        <div class="rec-detail"><span>CAP <b>${fmt(r.capitalBefore)}</b> » <b>${fmt(r.capitalAfter)}</b></span><span>INV <b>${fmt(r.invested)}</b></span><span>PAGO <b>${formatRatio(r.ratio)}</b></span></div>
+        ${r.id === lastId ? `<button class="rec-undo" data-undo="${esc(r.id)}">UNDO</button>` : ""}
+      </div>`;
+}
+
+function movementCard(m, lastId) {
+  const dep = m.type === "deposit";
+  return `<div class="hud rec move ${m.type}${m.id === newRecordId ? " is-new" : ""}">
+        <div class="badge ${m.type}">${dep ? "ABONO" : "RETIRO"}</div>
+        <div class="rec-time">${timeLabel(m.ts)}</div>
+        <div class="rec-delta">${dep ? "+" : "−"}${fmt(m.amount)}</div>
+        <div class="rec-detail"><span>CAP <b>${fmt(m.capitalBefore)}</b> » <b>${fmt(m.capitalAfter)}</b></span>${m.note ? `<span>« <i class="rec-note">${esc(m.note)}</i> »</span>` : ""}</div>
+        ${m.id === lastId ? `<button class="rec-undo" data-undo="${esc(m.id)}">UNDO</button>` : ""}
+      </div>`;
+}
+
 function renderWinRate() {
   const all = winRate(state.records);
   $("wrGlobal").textContent = all.total ? all.pct.toFixed(1) + "%" : "--.-%";
@@ -250,40 +310,48 @@ function renderWinRate() {
   const today = winRate(dayRecords(state.records, dayKey(Date.now())));
   $("wrToday").textContent = today.total ? `${today.pct.toFixed(1)}% (${today.wins}W ${today.losses}L)` : "SIN REGISTROS";
 
+  document.querySelectorAll("[data-filter]").forEach((b) => b.classList.toggle("is-active", b.dataset.filter === histFilter));
   const list = $("recordList");
-  if (!state.records.length) {
-    list.innerHTML = `<div class="hud panel empty"><div class="empty-icon">${pixelSvg("coin")}</div><div class="empty-txt">NO DATA</div><div class="empty-sub">PLAY YOUR FIRST ROUND</div></div>`;
+  const movements = state.movements || [];
+  // Línea de tiempo combinada: rondas + abonos/retiros (estos no cuentan en W/L ni en el neto del día)
+  const timeline = [
+    ...(histFilter !== "moves" ? state.records.map((r) => ({ kind: "record", e: r })) : []),
+    ...(histFilter !== "rounds" ? movements.map((m) => ({ kind: "movement", e: m })) : []),
+  ].sort((a, b) => b.e.ts - a.e.ts);
+  if (!timeline.length) {
+    const sub = histFilter === "moves" ? "SIN ABONOS NI RETIROS" : "PLAY YOUR FIRST ROUND";
+    list.innerHTML = `<div class="hud panel empty"><div class="empty-icon">${pixelSvg("coin")}</div><div class="empty-txt">NO DATA</div><div class="empty-sub">${sub}</div></div>`;
     return;
   }
-  const lastId = state.records[state.records.length - 1].id;
-  const groups = groupBy([...state.records].reverse(), (r) => r.dayKey);
+  const lastId = lastEntry(state)?.entry.id;
+  const groups = groupBy(timeline, (x) => x.e.dayKey);
   let html = "";
-  for (const [key, recs] of groups) {
-    const w = winRate(recs);
-    const net = sumDelta(recs);
-    html += `<div class="day-sep"><span>${dayLabel(key, true)} · ${w.wins}W ${w.losses}L</span><span class="net">${signed(net)}</span></div>`;
-    for (const r of recs) {
-      html += `<div class="hud rec ${r.result}${r.id === newRecordId ? " is-new" : ""}">
-        <div class="badge ${r.result}">${r.result === "win" ? "WIN" : "LOSE"}</div>
-        <div class="rec-time">${timeLabel(r.ts)}</div>
-        <div class="rec-delta">${signed(r.delta)}</div>
-        <div class="rec-detail"><span>CAP <b>${fmt(r.capitalBefore)}</b> » <b>${fmt(r.capitalAfter)}</b></span><span>INV <b>${fmt(r.invested)}</b></span><span>PAGO <b>${formatRatio(r.ratio)}</b></span></div>
-        ${r.id === lastId ? `<button class="rec-undo" data-undo="${esc(r.id)}">UNDO</button>` : ""}
-      </div>`;
+  for (const [key, items] of groups) {
+    const recs = items.filter((x) => x.kind === "record").map((x) => x.e);
+    if (recs.length) {
+      const w = winRate(recs);
+      html += `<div class="day-sep"><span>${dayLabel(key, true)} · ${w.wins}W ${w.losses}L</span><span class="net">${signed(sumDelta(recs))}</span></div>`;
+    } else {
+      html += `<div class="day-sep moves-only"><span>${dayLabel(key, true)}</span><span class="net">BANCO</span></div>`;
     }
+    for (const x of items) html += x.kind === "record" ? recordCard(x.e, lastId) : movementCard(x.e, lastId);
   }
   list.innerHTML = html;
   newRecordId = null;
 }
 
 async function onUndo() {
-  const last = state.records[state.records.length - 1];
-  if (!last) return;
+  const le = lastEntry(state);
+  if (!le) return;
+  const last = le.entry;
   sfx.click();
+  const what = le.kind === "record"
+    ? `${last.result === "win" ? "WIN" : "LOSE"} ${signed(last.delta)}`
+    : `${last.type === "deposit" ? "ABONO +" : "RETIRO −"}${fmt(last.amount)}`;
   const ok = await openModal({
     variant: "lose",
     tag: "UNDO",
-    text: `¿Eliminar el último registro (${last.result === "win" ? "WIN" : "LOSE"} ${signed(last.delta)})?`,
+    text: `¿Eliminar el último registro (${what})?`,
     sub: `El capital regresará a ${fmt(last.capitalBefore)} Coins.`,
     buttons: [{ label: "CANCELAR", value: false }, { label: "ELIMINAR", value: true, primary: true }],
   });
@@ -299,11 +367,20 @@ async function onUndo() {
 // ---------------- Stats ----------------
 function renderStats() {
   const recs = state.records;
-  const empty = recs.length === 0;
+  const movs = state.movements || [];
+  const empty = recs.length === 0 && movs.length === 0;
   $("statsEmpty").hidden = !empty;
   $("statsBody").hidden = empty;
   if (empty) return;
   const today = dayKey(Date.now());
+  const [y, mo] = today.split("-");
+  renderFlowStats(movs, today, y);
+  $("statsNoRounds").hidden = recs.length > 0;
+  $("statsRounds").hidden = recs.length === 0;
+  if (!recs.length) {
+    renderCharts(recs, today, movs);
+    return;
+  }
 
   // Barras de vida hoy vs ayer
   const bars = [
@@ -361,7 +438,7 @@ function renderStats() {
 
   // Récords
   const st = streaks(recs);
-  const dd = drawdown(recs);
+  const dd = drawdown(recs, movs);
   const bw = bestWorstDay(recs);
   const card = (label, value, sub, cls = "", wide = false) =>
     `<div class="hud panel rcard${wide ? " wide" : ""}"><div class="lbl">${label}</div><div class="rv ${cls}">${value}</div><div class="rs">${sub}</div></div>`;
@@ -372,13 +449,30 @@ function renderStats() {
     card("CAPITAL MAX.", fmt(dd.maxCapital), "histórico (Coins)", "pos"),
     card("MEJOR DIA", signed(bw.best.net), dayLabel(bw.best.dayKey, true), bw.best.net > 0 ? "pos" : "neg"),
     card("PEOR DIA", signed(bw.worst.net), dayLabel(bw.worst.dayKey, true), bw.worst.net < 0 ? "neg" : "pos"),
-    card("MAX DRAWDOWN", dd.coins ? "−" + fmt(dd.coins) : "0", `caída máx. desde el pico · ${dd.pct.toFixed(1)}%`, dd.coins ? "neg" : "", true),
+    card("MAX DRAWDOWN", dd.coins ? "−" + fmt(dd.coins) : "0", `desde el pico · ${dd.pct.toFixed(1)}% · sin retiros`, dd.coins ? "neg" : "", true),
   ].join("");
 
-  const [y, mo] = today.split("-");
   $("monthName").textContent = `${MONTHS[Number(mo) - 1]} ${y}`;
   $("yearName").textContent = y;
-  renderCharts(recs, today);
+  renderCharts(recs, today, movs);
+}
+
+function renderFlowStats(movs, today, year) {
+  const f = flowStats(movs, today);
+  const gameNet = sumDelta(state.records);
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const card = (label, value, sub, cls = "", wide = false) =>
+    `<div class="hud panel rcard${wide ? " wide" : ""}"><div class="lbl">${label}</div><div class="rv ${cls}">${value}</div><div class="rs">${sub}</div></div>`;
+  $("flowCards").innerHTML = [
+    card("TOTAL RETIRADO", fmt(f.withdraw), plural(f.withdrawCount, "retiro", "retiros"), f.withdraw ? "pos" : ""),
+    card("TOTAL ABONADO", fmt(f.deposit), plural(f.depositCount, "abono", "abonos"), f.deposit ? "neg" : ""),
+    card("RETIRADO MES", fmt(f.monthWithdraw), `${MONTHS[Number(today.slice(5, 7)) - 1]} ${year}`, f.monthWithdraw ? "pos" : ""),
+    card("ABONADO MES", fmt(f.monthDeposit), `${MONTHS[Number(today.slice(5, 7)) - 1]} ${year}`, f.monthDeposit ? "neg" : ""),
+    card("BALANCE BANCO", signed(f.net), f.net >= 0 ? "retirado − abonado · ya recuperaste" : "retirado − abonado · falta recuperar", f.net > 0 ? "pos" : f.net < 0 ? "neg" : "", true),
+    card("GANANCIA DE JUEGO", signed(gameNet), "solo rondas", gameNet > 0 ? "pos" : gameNet < 0 ? "neg" : ""),
+    card("MAYOR RETIRO", fmt(f.biggestWithdraw), "en un movimiento", f.biggestWithdraw ? "pos" : ""),
+  ].join("");
+  $("flowYear").textContent = year;
 }
 
 // ---------------- Tabs ----------------
@@ -522,7 +616,7 @@ async function importData(file) {
     variant: "lose",
     tag: "IMPORTAR",
     text: `Se reemplazarán TODOS tus datos actuales.`,
-    sub: `Archivo: ${v.state.records.length} registros · jugador ${v.state.settings.playerName || "---"} · capital ${fmt(v.state.settings.capital ?? 0)}`,
+    sub: `Archivo: ${v.state.records.length} rondas · ${v.state.movements.length} abonos/retiros · jugador ${v.state.settings.playerName || "---"} · capital ${fmt(v.state.settings.capital ?? 0)}`,
     buttons: [{ label: "CANCELAR", value: false }, { label: "REEMPLAZAR", value: true, primary: true }],
   });
   if (!ok) return;
@@ -632,6 +726,13 @@ function init() {
   document.querySelectorAll("[data-ratio]").forEach((b) => b.addEventListener("click", () => selectRatio(b.dataset.ratio)));
   $("btnCustomOk").addEventListener("click", applyCustom);
   $("inCustom").addEventListener("keydown", (e) => { if (e.key === "Enter") applyCustom(); });
+  $("btnDeposit").addEventListener("click", () => onMovement("deposit"));
+  $("btnWithdraw").addEventListener("click", () => onMovement("withdraw"));
+  document.querySelectorAll("[data-filter]").forEach((b) => b.addEventListener("click", () => {
+    sfx.click();
+    histFilter = b.dataset.filter;
+    renderWinRate();
+  }));
   $("btnWin").addEventListener("click", () => onResult("win"));
   $("btnLose").addEventListener("click", () => onResult("lose"));
   $("recordList").addEventListener("click", (e) => { if (e.target.closest("[data-undo]")) onUndo(); });

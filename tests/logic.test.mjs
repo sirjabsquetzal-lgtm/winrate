@@ -125,14 +125,97 @@ test("export → import idéntico", () => {
   const v = L.validateImport(JSON.parse(json));
   assert.equal(v.ok, true);
   assert.deepEqual(v.state, s);
-  assert.equal(JSON.parse(json).schemaVersion, 1);
+  assert.equal(JSON.parse(json).schemaVersion, 2);
 });
 test("import rechaza schemaVersion incorrecto y registros corruptos", () => {
-  assert.equal(L.validateImport({ schemaVersion: 2, settings: {}, records: [] }).ok, false);
+  assert.equal(L.validateImport({ schemaVersion: 99, settings: {}, records: [] }).ok, false);
+  assert.equal(L.validateImport({ schemaVersion: 2, settings: {}, records: [] }).ok, false); // v2 exige movements
   assert.equal(L.validateImport({ schemaVersion: 1, settings: {} }).ok, false);
   const bad = { schemaVersion: 1, settings: {}, records: [{ id: "x", ts: 1, dayKey: "2026-01-01", capitalBefore: 100, bullets: 20, ratio: 2, invested: 5, result: "win", delta: 10, capitalAfter: 999 }] };
   assert.equal(L.validateImport(bad).ok, false);
   assert.equal(L.validateImport("hola").ok, false);
+});
+
+console.log("Abonos y retiros");
+test("abono suma y retiro resta capital", () => {
+  let s = withSettings({ capital: 1000 });
+  let r = L.recordMovement(s, "deposit", 500, at(2026, 10, 26, 10), "recarga");
+  assert.equal(r.ok, true); s = r.state;
+  assert.equal(s.settings.capital, 1500);
+  assert.deepEqual([r.movement.capitalBefore, r.movement.capitalAfter, r.movement.note], [1000, 1500, "recarga"]);
+  r = L.recordMovement(s, "withdraw", 300, at(2026, 10, 26, 11), "skin");
+  s = r.state;
+  assert.equal(s.settings.capital, 1200);
+  assert.equal(s.movements.length, 2);
+  assert.equal(s.records.length, 0);
+});
+test("retiro mayor al capital y montos inválidos se rechazan", () => {
+  const s = withSettings({ capital: 100 });
+  assert.equal(L.recordMovement(s, "withdraw", 101, at(2026, 10, 26, 10)).reason, "exceeds");
+  assert.equal(L.recordMovement(s, "withdraw", 100, at(2026, 10, 26, 10)).ok, true);
+  assert.equal(L.recordMovement(s, "deposit", 0, at(2026, 10, 26, 10)).reason, "amount");
+  assert.equal(L.recordMovement(s, "deposit", -5, at(2026, 10, 26, 10)).reason, "amount");
+  assert.equal(L.recordMovement(s, "deposit", 2.5, at(2026, 10, 26, 10)).reason, "amount");
+});
+test("los movimientos no afectan win rate, rachas ni bloqueo", () => {
+  let s = withSettings({ capital: 1000 });
+  s = L.recordResult(s, "lose", at(2026, 10, 26, 10)).state;
+  s = L.recordMovement(s, "withdraw", 200, at(2026, 10, 26, 11)).state;
+  s = L.recordMovement(s, "deposit", 900, at(2026, 10, 26, 12)).state;
+  assert.equal(L.winRate(s.records).total, 1);
+  assert.equal(L.lockStatus(s.records, at(2026, 10, 26, 13)).lives, 1);
+  assert.equal(L.recordResult(s, "win", at(2026, 10, 26, 14)).ok, true);
+  assert.deepEqual(L.streaks(s.records).current, { type: "lose", count: 1 });
+});
+test("undo deshace la entrada más reciente (ronda o movimiento)", () => {
+  let s = withSettings({ capital: 1000 });
+  s = L.recordResult(s, "win", at(2026, 10, 26, 10)).state;     // 1100
+  s = L.recordMovement(s, "withdraw", 600, at(2026, 10, 26, 11)).state; // 500
+  let u = L.undoLast(s);
+  assert.equal(u.kind, "movement");
+  assert.equal(u.state.settings.capital, 1100);
+  assert.equal(u.state.records.length, 1);
+  assert.equal(u.state.movements.length, 0);
+  u = L.undoLast(u.state);
+  assert.equal(u.kind, "record");
+  assert.equal(u.state.settings.capital, 1000);
+});
+test("un retiro no cuenta como drawdown; capital máximo sí incluye abonos", () => {
+  let s = withSettings({ capital: 1000, bullets: 10, ratio: 2 });
+  s = L.recordResult(s, "win", at(2026, 10, 1, 10)).state;           // 1200
+  s = L.recordMovement(s, "withdraw", 1000, at(2026, 10, 1, 11)).state; // 200
+  s = L.recordMovement(s, "deposit", 5000, at(2026, 10, 2, 11)).state;  // 5200
+  s = L.recordResult(s, "lose", at(2026, 10, 2, 12)).state;          // 5200 - 520 = 4680
+  const dd = L.drawdown(s.records, s.movements);
+  assert.equal(dd.coins, 520);
+  assert.equal(dd.maxCapital, 5200);
+  assert.equal(L.capitalSeries(s.records, s.movements).length, 5);
+});
+test("métricas de flujos", () => {
+  let s = withSettings({ capital: 1000 });
+  s = L.recordMovement(s, "deposit", 400, at(2026, 9, 10, 10)).state;
+  s = L.recordMovement(s, "withdraw", 300, at(2026, 10, 3, 10)).state;
+  s = L.recordMovement(s, "withdraw", 700, at(2026, 10, 20, 10)).state;
+  const f = L.flowStats(s.movements, "2026-10-26");
+  assert.deepEqual([f.deposit, f.withdraw, f.depositCount, f.withdrawCount, f.net], [400, 1000, 1, 2, 600]);
+  assert.deepEqual([f.monthDeposit, f.monthWithdraw, f.biggestWithdraw], [0, 1000, 700]);
+  assert.deepEqual(f.byMonth[8], { month: 9, deposit: 400, withdraw: 0 });
+  assert.deepEqual(f.byMonth[9], { month: 10, deposit: 0, withdraw: 1000 });
+});
+test("export → import con movimientos idéntico; v1 se migra", () => {
+  let s = withSettings({ capital: 1000 });
+  s = L.recordResult(s, "win", at(2026, 10, 20, 12)).state;
+  s = L.recordMovement(s, "withdraw", 100, at(2026, 10, 21, 12), "pase de batalla").state;
+  const v = L.validateImport(JSON.parse(L.exportState(s)));
+  assert.equal(v.ok, true);
+  assert.deepEqual(v.state, s);
+  const v1 = { schemaVersion: 1, settings: s.settings, records: s.records };
+  const m = L.validateImport(v1);
+  assert.equal(m.ok, true);
+  assert.equal(m.state.schemaVersion, 2);
+  assert.deepEqual(m.state.movements, []);
+  assert.deepEqual(L.migrate(v1).movements, []);
+  assert.equal(L.migrate(v1).records.length, 1);
 });
 
 console.log("Estadísticas");

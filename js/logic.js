@@ -1,7 +1,7 @@
 // WinRate — lógica pura (sin DOM). Se usa en la app y en los tests de Node.
 
-export const SCHEMA_VERSION = 1;
-export const APP_VERSION = "1.0.0";
+export const SCHEMA_VERSION = 2; // v2: agrega `movements` (abonos y retiros)
+export const APP_VERSION = "1.1.0";
 export const MAX_LOSSES_PER_DAY = 2;
 export const DAY_START_HOUR = 6;
 export const RATIO_PRESETS = ["1.5", "2", "3"];
@@ -24,7 +24,7 @@ export function defaultSettings() {
 }
 
 export function defaultState() {
-  return { schemaVersion: SCHEMA_VERSION, settings: defaultSettings(), records: [] };
+  return { schemaVersion: SCHEMA_VERSION, settings: defaultSettings(), records: [], movements: [] };
 }
 
 // ---------- Cálculos de la calculadora ----------
@@ -182,15 +182,54 @@ export function recordResult(state, result, now) {
   return { ok: true, state: next, record, scenario };
 }
 
-export function undoLast(state) {
-  if (!state.records.length) return { ok: false, state };
-  const records = state.records.slice(0, -1);
-  const removed = state.records[state.records.length - 1];
+// ---------- Movimientos (abonos / retiros) ----------
+// No son rondas: no cuentan para el win rate, las rachas ni el bloqueo diario.
+export const MOVEMENT_TYPES = ["deposit", "withdraw"];
+export const MAX_NOTE = 40;
+
+/** Registra un abono ("deposit") o retiro ("withdraw"). Devuelve { ok, state, movement } o { ok:false, reason }. */
+export function recordMovement(state, type, amount, now, note = "") {
+  if (!MOVEMENT_TYPES.includes(type)) return { ok: false, reason: "type" };
+  const amt = toInt(amount);
+  if (!Number.isFinite(amt) || amt <= 0 || String(amount).trim() !== String(amt)) return { ok: false, reason: "amount" };
+  const capitalBefore = Number.isFinite(toInt(state.settings.capital)) ? toInt(state.settings.capital) : 0;
+  if (type === "withdraw" && amt > capitalBefore) return { ok: false, reason: "exceeds" };
+  const delta = type === "deposit" ? amt : -amt;
+  const movement = {
+    id: newId(now),
+    ts: now,
+    dayKey: dayKey(now),
+    type,
+    amount: amt,
+    capitalBefore,
+    capitalAfter: capitalBefore + delta,
+    note: String(note || "").trim().slice(0, MAX_NOTE),
+  };
   return {
     ok: true,
-    removed,
-    state: { ...state, settings: { ...state.settings, capital: removed.capitalBefore }, records },
+    movement,
+    state: { ...state, settings: { ...state.settings, capital: movement.capitalAfter }, movements: [...(state.movements || []), movement] },
   };
+}
+
+/** La entrada más reciente de la línea de tiempo (ronda o movimiento). */
+export function lastEntry(state) {
+  const r = state.records[state.records.length - 1];
+  const m = (state.movements || [])[(state.movements || []).length - 1];
+  if (!r && !m) return null;
+  if (!m || (r && r.ts >= m.ts)) return { kind: "record", entry: r };
+  return { kind: "movement", entry: m };
+}
+
+/** Deshace la entrada más reciente (ronda o movimiento) y regresa el capital a su "capital anterior". */
+export function undoLast(state) {
+  const last = lastEntry(state);
+  if (!last) return { ok: false, state };
+  const removed = last.entry;
+  const next = { ...state, settings: { ...state.settings, capital: removed.capitalBefore } };
+  if (last.kind === "record") next.records = state.records.slice(0, -1);
+  else next.movements = state.movements.slice(0, -1);
+  return { ok: true, kind: last.kind, removed, state: next };
 }
 
 // ---------- Frases ----------
@@ -230,7 +269,7 @@ export function pickPhraseIndex(scenario, lastIdx, rnd = Math.random) {
 // ---------- Validación / import / export ----------
 export function exportState(state) {
   return JSON.stringify(
-    { schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString(), app: "WinRate", settings: state.settings, records: state.records },
+    { schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString(), app: "WinRate", settings: state.settings, records: state.records, movements: state.movements || [] },
     null,
     2
   );
@@ -252,6 +291,18 @@ export function validateRecord(r) {
   );
 }
 
+export function validateMovement(m) {
+  return (
+    m && typeof m === "object" &&
+    typeof m.id === "string" && m.id.length > 0 &&
+    isNum(m.ts) && typeof m.dayKey === "string" && KEY_RE.test(m.dayKey) &&
+    MOVEMENT_TYPES.includes(m.type) && isInt(m.amount) && m.amount > 0 &&
+    isInt(m.capitalBefore) && isInt(m.capitalAfter) &&
+    m.capitalAfter === m.capitalBefore + (m.type === "deposit" ? m.amount : -m.amount) &&
+    (m.note === undefined || typeof m.note === "string")
+  );
+}
+
 export function sanitizeSettings(s) {
   const d = defaultSettings();
   if (!s || typeof s !== "object") return d;
@@ -270,24 +321,32 @@ export function sanitizeSettings(s) {
 /** Valida un objeto importado. Devuelve { ok, state } o { ok:false, error }. */
 export function validateImport(data) {
   if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false, error: "El archivo no es un objeto JSON válido." };
-  if (data.schemaVersion !== SCHEMA_VERSION)
-    return { ok: false, error: `schemaVersion no soportado (${data.schemaVersion ?? "ausente"}). Se esperaba ${SCHEMA_VERSION}.` };
+  if (data.schemaVersion !== 1 && data.schemaVersion !== SCHEMA_VERSION)
+    return { ok: false, error: `schemaVersion no soportado (${data.schemaVersion ?? "ausente"}). Se esperaba 1 o ${SCHEMA_VERSION}.` };
   if (!data.settings || typeof data.settings !== "object") return { ok: false, error: "Falta el bloque 'settings'." };
   if (!Array.isArray(data.records)) return { ok: false, error: "Falta la lista 'records'." };
   for (let i = 0; i < data.records.length; i++) {
     if (!validateRecord(data.records[i])) return { ok: false, error: `Registro #${i + 1} inválido.` };
   }
+  // v1 no tenía movimientos
+  const rawMov = data.schemaVersion === 1 ? data.movements ?? [] : data.movements;
+  if (!Array.isArray(rawMov)) return { ok: false, error: "Falta la lista 'movements'." };
+  for (let i = 0; i < rawMov.length; i++) {
+    if (!validateMovement(rawMov[i])) return { ok: false, error: `Movimiento #${i + 1} inválido.` };
+  }
   const records = [...data.records].sort((a, b) => a.ts - b.ts);
-  return { ok: true, state: { schemaVersion: SCHEMA_VERSION, settings: sanitizeSettings(data.settings), records } };
+  const movements = rawMov.map((m) => ({ ...m, note: m.note ?? "" })).sort((a, b) => a.ts - b.ts);
+  return { ok: true, state: { schemaVersion: SCHEMA_VERSION, settings: sanitizeSettings(data.settings), records, movements } };
 }
 
 /** Normaliza lo leído de localStorage (con migración futura por schemaVersion). */
 export function migrate(raw) {
   if (!raw || typeof raw !== "object") return defaultState();
-  // Aquí irían migraciones: if (raw.schemaVersion === 0) {...}
-  if (raw.schemaVersion !== SCHEMA_VERSION) return defaultState();
+  if (raw.schemaVersion !== 1 && raw.schemaVersion !== SCHEMA_VERSION) return defaultState();
   const records = Array.isArray(raw.records) ? raw.records.filter(validateRecord) : [];
-  return { schemaVersion: SCHEMA_VERSION, settings: sanitizeSettings(raw.settings), records };
+  // v1 → v2: se agrega la lista de movimientos vacía
+  const movements = Array.isArray(raw.movements) ? raw.movements.filter(validateMovement).map((m) => ({ ...m, note: m.note ?? "" })) : [];
+  return { schemaVersion: SCHEMA_VERSION, settings: sanitizeSettings(raw.settings), records, movements };
 }
 
 // ---------- Estadísticas ----------
@@ -327,11 +386,14 @@ export function averages(records) {
   return out;
 }
 
-export function capitalSeries(records) {
-  if (!records.length) return [];
-  const pts = [{ ts: records[0].ts, value: records[0].capitalBefore, start: true }];
-  for (const r of records) pts.push({ ts: r.ts, value: r.capitalAfter, result: r.result });
-  return pts;
+/** Curva de capital con rondas y movimientos en orden cronológico. */
+export function capitalSeries(records, movements = []) {
+  const all = [
+    ...records.map((r) => ({ ts: r.ts, before: r.capitalBefore, value: r.capitalAfter, result: r.result, flow: 0 })),
+    ...movements.map((m) => ({ ts: m.ts, before: m.capitalBefore, value: m.capitalAfter, movement: m.type, flow: m.capitalAfter - m.capitalBefore })),
+  ].sort((a, b) => a.ts - b.ts);
+  if (!all.length) return [];
+  return [{ ts: all[0].ts, value: all[0].before, start: true, flow: 0 }, ...all];
 }
 
 export function streaks(records) {
@@ -345,16 +407,50 @@ export function streaks(records) {
   return { bestWin, worstLose, current: curType ? { type: curType, count: cur } : null };
 }
 
-export function drawdown(records) {
-  const s = capitalSeries(records);
-  let peak = -Infinity, maxDD = 0, maxPct = 0;
+/**
+ * Caída máxima desde el pico, medida solo con el resultado de las rondas:
+ * a la curva se le restan los abonos/retiros acumulados, así un retiro no cuenta como pérdida.
+ * maxCapital sí es el capital real más alto (incluye movimientos).
+ */
+export function drawdown(records, movements = []) {
+  const s = capitalSeries(records, movements);
+  let peak = -Infinity, maxDD = 0, maxPct = 0, flows = 0;
   for (const p of s) {
-    if (p.value > peak) peak = p.value;
-    const dd = peak - p.value;
+    flows += p.flow;
+    if (p.result === undefined && !p.start) continue; // los movimientos no mueven la curva de rendimiento
+    const v = p.value - flows;
+    if (v > peak) peak = v;
+    const dd = peak - v;
     if (dd > maxDD) maxDD = dd;
     if (peak > 0 && dd / peak > maxPct) maxPct = dd / peak;
   }
   return { coins: maxDD, pct: maxPct * 100, maxCapital: s.length ? Math.max(...s.map((p) => p.value)) : null };
+}
+
+/** Métricas de abonos y retiros. */
+export function flowStats(movements, todayKey) {
+  const sum = (list, type) => list.filter((m) => m.type === type).reduce((s, m) => s + m.amount, 0);
+  const count = (list, type) => list.filter((m) => m.type === type).length;
+  const month = movements.filter((m) => m.dayKey.startsWith(todayKey.slice(0, 7)));
+  const y = todayKey.slice(0, 4);
+  const byMonth = [];
+  for (let mo = 1; mo <= 12; mo++) {
+    const list = movements.filter((m) => m.dayKey.startsWith(`${y}-${pad(mo)}`));
+    byMonth.push({ month: mo, deposit: sum(list, "deposit"), withdraw: sum(list, "withdraw") });
+  }
+  const deposit = sum(movements, "deposit");
+  const withdraw = sum(movements, "withdraw");
+  const withdrawals = movements.filter((m) => m.type === "withdraw");
+  return {
+    deposit, withdraw,
+    depositCount: count(movements, "deposit"),
+    withdrawCount: count(movements, "withdraw"),
+    net: withdraw - deposit, // > 0: ya sacaste más de lo que metiste
+    monthDeposit: sum(month, "deposit"),
+    monthWithdraw: sum(month, "withdraw"),
+    biggestWithdraw: withdrawals.length ? Math.max(...withdrawals.map((m) => m.amount)) : 0,
+    byMonth,
+  };
 }
 
 export function bestWorstDay(records) {

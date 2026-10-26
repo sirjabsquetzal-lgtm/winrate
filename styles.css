@@ -749,3 +749,43 @@ button { cursor: pointer; touch-action: manipulation; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* ---------- Abonos / retiros ---------- */
+.flow-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+.flow-btn {
+  position: relative; isolation: isolate;
+  height: 42px;
+  border: 0;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  background: var(--silver-grad);
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+  font-family: var(--font-pixel); font-size: 9px; letter-spacing: 1px;
+  color: var(--text);
+  transition: transform .08s, filter .15s;
+}
+.flow-btn::before {
+  content: ""; position: absolute; inset: 2px; z-index: -1;
+  background: var(--panel-2);
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+.flow-btn:active { transform: translateY(2px) scale(.98); }
+.flow-btn:hover { filter: drop-shadow(0 0 6px var(--glow-soft)); }
+.flow-sign { font-family: var(--font-num); font-size: 30px; line-height: 1; margin-top: -3px; }
+.flow-btn.deposit .flow-sign { color: var(--silver); }
+.flow-btn.withdraw .flow-sign { color: var(--red); text-shadow: 0 0 6px var(--glow-soft); }
+
+.seg-3 { grid-template-columns: repeat(3, 1fr); }
+.hist-filter { margin-bottom: 10px; }
+
+.rec.move { --c: var(--cut-sm); }
+.rec.move::before { background: repeating-linear-gradient(-45deg, var(--panel) 0 10px, var(--panel-2) 10px 20px); }
+.badge.deposit { background: var(--bg); color: var(--text); outline: 2px solid var(--silver); outline-offset: -2px; font-size: 8px; }
+.badge.withdraw { background: var(--bg); color: var(--red); outline: 2px solid var(--red); outline-offset: -2px; font-size: 8px; box-shadow: 0 0 8px var(--glow-soft); }
+.rec.move.deposit .rec-delta { color: var(--silver); }
+.rec.move.withdraw .rec-delta { color: var(--red); }
+.rec-note { color: var(--text); font-style: normal; }
+.day-sep.moves-only { opacity: .85; }
+
+.bank-note { font-size: 17px; color: var(--text-dim); margin: -4px 0 10px; text-align: center; }
+#flowCards { margin-bottom: 12px; }
+.flow-chart-panel { margin-top: 0; }

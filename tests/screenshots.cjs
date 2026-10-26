@@ -19,6 +19,12 @@ async function demoState(theme) {
     const day = new Date(now);
     day.setDate(day.getDate() - back);
     day.setHours(14, 0, 0, 0);
+    // abonos y retiros de vez en cuando
+    if (back % 17 === 3 && s.settings.capital > 400) {
+      s = L.recordMovement(s, "withdraw", Math.floor(s.settings.capital * 0.3), day.getTime() - 3600000, ["skin", "pase de batalla", "emotes"][back % 3]).state;
+    } else if (back % 23 === 5) {
+      s = L.recordMovement(s, "deposit", 500, day.getTime() - 3600000, "recarga").state;
+    }
     const n = 1 + Math.floor(rnd() * 4);
     for (let i = 0; i < n; i++) {
       const ts = day.getTime() + i * 47 * 60000 + Math.floor(rnd() * 600000);
@@ -64,6 +70,15 @@ async function demoState(theme) {
     await shot("1b-calculator-custom");
     await page.click('[data-ratio="2"]');
 
+    // abonar / retirar
+    await page.click("#btnWithdraw");
+    await page.fill("#mf_amount", "300");
+    await page.fill("#mf_note", "skin legendaria");
+    await page.waitForTimeout(400);
+    await shot("9-modal-retirar");
+    await page.click(".modal-btns .primary");
+    await page.waitForTimeout(900);
+
     await page.click("#btnWin");
     await page.waitForTimeout(2600);
     await shot("4-modal-win");
@@ -90,11 +105,11 @@ async function demoState(theme) {
     await shot("3-stats");
     // Por secciones (fullPage redimensiona el viewport y Chart.js se re-anima)
     let i = 0;
-    for (const sel of ["#chCapital", "#chYear", "#heatmap", "#records"]) {
+    for (const sel of ["#chCapital", "#chYear", "#heatmap", "#records", "#flowCards", "#chFlows"]) {
       await page.$eval(sel, (el) => el.closest(".panel, .records-grid").scrollIntoView({ block: "start" }));
       await page.evaluate(() => window.scrollBy(0, -90));
       await page.waitForTimeout(1200);
-      await shot(`3${"bcde"[i++]}-stats`);
+      await shot(`3${"bcdefg"[i++]}-stats`);
     }
 
     await page.click("#btnSettings");
