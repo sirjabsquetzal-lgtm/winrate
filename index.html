@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>WinRate</title>
+  <meta name="description" content="WinRate — control de inversiones de Coins: calculadora, límite diario y estadísticas." />
+  <meta name="theme-color" content="#050507" />
+  <meta name="color-scheme" content="dark light" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="icons/favicon-64.png" />
+  <!-- iOS -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="WinRate" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="preload" href="vendor/fonts/press-start-2p-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="vendor/fonts/vt323-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="styles.css" />
+  <script>
+    // Aplica el tema guardado antes de pintar (evita parpadeo)
+    try {
+      var s = JSON.parse(localStorage.getItem("winrate.v1") || "null");
+      if (s && s.settings && (s.settings.theme === "light" || s.settings.theme === "dark"))
+        document.documentElement.setAttribute("data-theme", s.settings.theme);
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <h1 class="logo glitch" data-text="WINRATE">WINRATE</h1>
+        <div class="player">PLAYER: <span id="playerName">---</span></div>
+      </div>
+      <button id="btnSettings" class="icon-btn" aria-label="Settings" data-icon="gear"></button>
+    </header>
+
+    <main id="screens">
+      <!-- ============ CALCULATOR ============ -->
+      <section id="tab-calc" class="tab is-active" aria-label="Calculator">
+        <div class="lives-row">
+          <span class="lbl">VIDAS HOY</span>
+          <span id="hearts" class="hearts" aria-live="polite"></span>
+          <span id="dayLabel" class="day-label"></span>
+        </div>
+
+        <div class="hud panel capital-panel">
+          <label class="lbl" for="inCapital">CAPITAL <span class="unit">(COINS)</span></label>
+          <div class="capital-input">
+            <span class="coin-icon" data-icon="coin" aria-hidden="true"></span>
+            <input id="inCapital" class="num-input big" type="text" inputmode="numeric" autocomplete="off" placeholder="0" />
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="hud panel">
+            <label class="lbl" for="inBullets">BULLETS</label>
+            <input id="inBullets" class="num-input" type="text" inputmode="numeric" autocomplete="off" />
+          </div>
+          <div class="hud panel">
+            <span class="lbl">PAGO AL GANAR</span>
+            <div id="ratioDisplay" class="ratio-display">1:2</div>
+          </div>
+        </div>
+
+        <div class="ratio-btns" role="radiogroup" aria-label="Pago al ganar">
+          <button class="chip" data-ratio="1.5" role="radio">1:1.5</button>
+          <button class="chip" data-ratio="2" role="radio">1:2</button>
+          <button class="chip" data-ratio="3" role="radio">1:3</button>
+          <button class="chip" data-ratio="custom" role="radio">CUSTOM</button>
+        </div>
+        <div id="customRow" class="custom-row" hidden>
+          <span class="custom-prefix">1:</span>
+          <input id="inCustom" class="num-input" type="text" inputmode="decimal" placeholder="4.5" autocomplete="off" />
+          <button id="btnCustomOk" class="chip">OK</button>
+        </div>
+
+        <div class="hud panel scoreboard">
+          <div class="lbl center">A INVERTIR</div>
+          <div id="investOut" class="score-num">0</div>
+          <div id="investWarn" class="warn" hidden>CAPITAL INSUFICIENTE</div>
+        </div>
+
+        <div class="grid-2 projections">
+          <div class="hud panel proj proj-lose">
+            <div class="lbl">SI PIERDES</div>
+            <div id="projLoseDelta" class="proj-delta">−0</div>
+            <div class="proj-cap">» <span id="projLoseCap">0</span></div>
+          </div>
+          <div class="hud panel proj proj-win">
+            <div class="lbl">SI GANAS</div>
+            <div id="projWinDelta" class="proj-delta">+0</div>
+            <div class="proj-cap">» <span id="projWinCap">0</span></div>
+          </div>
+        </div>
+
+        <div class="final">
+          <div class="final-title"><span>FINAL RESULTS</span></div>
+          <div class="final-btns">
+            <button id="btnLose" class="arcade arcade-lose"><span class="face">LOSE</span></button>
+            <button id="btnWin" class="arcade arcade-win"><span class="face">WIN</span></button>
+          </div>
+          <div id="lockPanel" class="hud lock-panel" hidden>
+            <div class="lock-icon" data-icon="lock" aria-hidden="true"></div>
+            <div class="lock-title glitch" data-text="SYSTEM LOCKED">SYSTEM LOCKED</div>
+            <div class="lock-sub">Límite diario de 2 pérdidas alcanzado</div>
+            <div id="lockCountdown" class="lock-count">00:00:00</div>
+            <div class="lock-sub">Se libera a las 06:00</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ WIN-RATE ============ -->
+      <section id="tab-winrate" class="tab" aria-label="Win-Rate" hidden>
+        <div class="hud panel wr-hero">
+          <div class="lbl center">WIN RATE GLOBAL</div>
+          <div id="wrGlobal" class="wr-big">--.-%</div>
+          <div class="wr-counts">
+            <span class="w"><b id="wrWins">0</b> W</span>
+            <span class="sep">/</span>
+            <span class="l"><b id="wrLosses">0</b> L</span>
+            <span class="sep">/</span>
+            <span><b id="wrTotal">0</b> TOTAL</span>
+          </div>
+          <div class="wr-today">HOY: <span id="wrToday">--</span></div>
+        </div>
+        <div class="section-title"><span>REGISTROS</span></div>
+        <div id="recordList" class="record-list"></div>
+      </section>
+
+      <!-- ============ STATS ============ -->
+      <section id="tab-stats" class="tab" aria-label="Stats" hidden>
+        <div id="statsEmpty" class="hud panel empty" hidden>
+          <div class="empty-icon" data-icon="coin"></div>
+          <div class="empty-txt">NO DATA</div>
+          <div class="empty-sub">PLAY YOUR FIRST ROUND</div>
+        </div>
+        <div id="statsBody">
+          <div class="hud panel">
+            <div class="card-title">WIN RATE · HOY VS AYER</div>
+            <div id="lifeBars" class="lifebars"></div>
+          </div>
+
+          <div class="avg-grid" id="avgGrid"></div>
+
+          <div class="hud panel">
+            <div class="card-title">COINS EN EL TIEMPO</div>
+            <div class="chart-box"><canvas id="chCapital"></canvas></div>
+          </div>
+
+          <div class="hud panel">
+            <div class="card-title">WIN RATE · <span id="monthName">MES</span></div>
+            <div class="chart-box" data-empty="Sin actividad este mes"><canvas id="chMonth"></canvas></div>
+          </div>
+
+          <div class="hud panel">
+            <div class="card-title">WIN RATE · AÑO <span id="yearName"></span></div>
+            <div class="chart-box"><canvas id="chYear"></canvas></div>
+          </div>
+
+          <div class="hud panel">
+            <div class="card-title">WINS VS LOSSES</div>
+            <div class="chart-box donut-box"><div class="donut-canvas"><canvas id="chDonut"></canvas></div><div id="donutCenter" class="donut-center"></div></div>
+          </div>
+
+          <div class="hud panel">
+            <div class="card-title">ACTIVIDAD DIARIA · 13 SEMANAS</div>
+            <div id="heatmap" class="heatmap"></div>
+            <div class="heat-legend">
+              <span><i class="hl hl-pos"></i> NETO +</span>
+              <span><i class="hl hl-neg"></i> NETO −</span>
+              <span><i class="hl hl-zero"></i> NETO 0</span>
+              <span class="dim">más intenso = más registros</span>
+            </div>
+          </div>
+
+          <div class="section-title"><span>RECORDS</span></div>
+          <div id="records" class="records-grid"></div>
+        </div>
+      </section>
+    </main>
+
+    <nav class="tabbar" aria-label="Pestañas">
+      <button class="tab-btn is-active" data-tab="calc"><span data-icon="calc"></span><span>CALC</span></button>
+      <button class="tab-btn" data-tab="winrate"><span data-icon="trophy"></span><span>WIN-RATE</span></button>
+      <button class="tab-btn" data-tab="stats"><span data-icon="chart"></span><span>STATS</span></button>
+    </nav>
+  </div>
+
+  <!-- ============ SETTINGS ============ -->
+  <div id="drawerBackdrop" class="backdrop" hidden></div>
+  <aside id="settings" class="drawer" aria-label="Settings" aria-hidden="true">
+    <div class="drawer-head">
+      <h2 class="glitch" data-text="SETTINGS">SETTINGS</h2>
+      <button id="btnCloseSettings" class="icon-btn" aria-label="Cerrar">X</button>
+    </div>
+    <div class="drawer-body">
+      <label class="lbl" for="inName">NOMBRE DEL JUGADOR</label>
+      <input id="inName" class="text-input" type="text" maxlength="16" autocomplete="off" spellcheck="false" />
+
+      <div class="lbl">TEMA</div>
+      <div class="seg" id="segTheme">
+        <button class="chip" data-theme-opt="dark">DARK</button>
+        <button class="chip" data-theme-opt="light">LIGHT</button>
+      </div>
+
+      <div class="lbl">SONIDO</div>
+      <div class="seg" id="segSound">
+        <button class="chip" data-sound-opt="on">ON</button>
+        <button class="chip" data-sound-opt="off">OFF</button>
+      </div>
+
+      <div class="lbl">DATOS</div>
+      <button id="btnExport" class="btn-wide">EXPORTAR .JSON</button>
+      <button id="btnImport" class="btn-wide">IMPORTAR .JSON</button>
+      <input id="fileImport" type="file" accept="application/json,.json" hidden />
+      <button id="btnReset" class="btn-wide danger">RESET TOTAL</button>
+
+      <div class="version">WINRATE v<span id="appVersion"></span> · schema <span id="schemaVersion"></span></div>
+    </div>
+  </aside>
+
+  <!-- ============ MODAL / TOAST / FX ============ -->
+  <div id="modalRoot" class="modal-root" hidden></div>
+  <div id="toast" class="toast" hidden></div>
+  <canvas id="fx" class="fx" aria-hidden="true"></canvas>
+  <div class="crt" aria-hidden="true"></div>
+
+  <script src="vendor/chart.umd.4.4.1.min.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
