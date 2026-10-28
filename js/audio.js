@@ -42,6 +42,7 @@ export const sfx = {
   click: () => seq([[880, 0.035, "square", 0.06]]),
   win: () => seq([[523, 0.08], [659, 0.08], [784, 0.08], [1047, 0.22, "square", 0.14]], { gap: 0.01 }),
   lose: () => seq([[392, 0.12, "sawtooth", 0.1], [311, 0.12, "sawtooth", 0.1], [233, 0.3, "sawtooth", 0.1]], { gap: 0.02, slide: true }),
+  tie: () => seq([[660, 0.08, "triangle", 0.12], [660, 0.16, "triangle", 0.1]], { gap: 0.04 }),
   coin: () => seq([[988, 0.06, "square", 0.1], [1319, 0.18, "square", 0.1]], { gap: 0.005 }),
   lock: () => seq([[220, 0.09, "square", 0.12], [220, 0.09, "square", 0.12], [110, 0.45, "triangle", 0.2]], { gap: 0.05 }),
 };

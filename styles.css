@@ -401,7 +401,7 @@ button { cursor: pointer; touch-action: manipulation; }
 .final-title::before, .final-title::after, .section-title::before, .section-title::after {
   content: ""; flex: 1; height: 2px; background: var(--silver-grad);
 }
-.final-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.final-btns { display: grid; grid-template-columns: 1fr .78fr 1fr; gap: 10px; }
 
 .arcade {
   --face: var(--red);
@@ -440,6 +440,11 @@ button { cursor: pointer; touch-action: manipulation; }
 .arcade-lose {
   --face: #9aa0ab; --face-hi: #eef0f4; --face-lo: #5d636e; --base: #3b3f47; --ink: #0b0b0e;
 }
+.arcade-tie {
+  --face: #2b2e36; --face-hi: #565b66; --face-lo: #15171c; --base: #0b0c0f; --ink: var(--silver);
+}
+.arcade-tie .face { font-size: 17px; outline: 2px solid var(--silver-dim); outline-offset: -4px; }
+:root[data-theme="light"] .arcade-tie { --ink: #e9ecf1; }
 :root[data-theme="light"] .arcade-lose { --face: #8a909b; --face-hi: #d4d8de; --face-lo: #4d535d; --base: #2c3036; --ink: #0b0b0e; }
 .arcade:active .face, .arcade.pressed .face { transform: translateY(7px); }
 .arcade:disabled { cursor: not-allowed; filter: grayscale(1) opacity(.35); }
@@ -789,3 +794,13 @@ button { cursor: pointer; touch-action: manipulation; }
 .bank-note { font-size: 17px; color: var(--text-dim); margin: -4px 0 10px; text-align: center; }
 #flowCards { margin-bottom: 12px; }
 .flow-chart-panel { margin-top: 0; }
+
+/* ---------- Empate ---------- */
+.badge.tie { background: var(--panel-2); color: var(--text-dim); outline: 2px dashed var(--silver-dim); outline-offset: -2px; }
+.rec.tie .rec-delta { color: var(--text-dim); }
+.wr-counts .t b { color: var(--text-dim); }
+.modal.tie { background: linear-gradient(135deg, var(--silver-dim), var(--panel-2) 50%, var(--silver-dim)); }
+.modal.tie .modal-big { color: var(--text-dim); }
+.rec-calc { color: var(--text-dim); }
+.rec-calc b { color: var(--silver); }
+.amount-hint { margin-top: 6px; font-size: 18px; color: var(--text-dim); }

@@ -104,6 +104,7 @@
           <div class="final-title"><span>FINAL RESULTS</span></div>
           <div class="final-btns">
             <button id="btnLose" class="arcade arcade-lose"><span class="face">LOSE</span></button>
+            <button id="btnTie" class="arcade arcade-tie"><span class="face">TIE</span></button>
             <button id="btnWin" class="arcade arcade-win"><span class="face">WIN</span></button>
           </div>
           <div id="lockPanel" class="hud lock-panel" hidden>
@@ -119,12 +120,14 @@
       <!-- ============ WIN-RATE ============ -->
       <section id="tab-winrate" class="tab" aria-label="Win-Rate" hidden>
         <div class="hud panel wr-hero">
-          <div class="lbl center">WIN RATE GLOBAL</div>
+          <div class="lbl center">WIN RATE GLOBAL · W/(W+L)</div>
           <div id="wrGlobal" class="wr-big">--.-%</div>
           <div class="wr-counts">
             <span class="w"><b id="wrWins">0</b> W</span>
             <span class="sep">/</span>
             <span class="l"><b id="wrLosses">0</b> L</span>
+            <span class="sep">/</span>
+            <span class="t"><b id="wrTies">0</b> T</span>
             <span class="sep">/</span>
             <span><b id="wrTotal">0</b> TOTAL</span>
           </div>
@@ -175,7 +178,7 @@
           </div>
 
           <div class="hud panel">
-            <div class="card-title">WINS VS LOSSES</div>
+            <div class="card-title">WINS VS LOSSES VS TIES</div>
             <div class="chart-box donut-box"><div class="donut-canvas"><canvas id="chDonut"></canvas></div><div id="donutCenter" class="donut-center"></div></div>
           </div>
 

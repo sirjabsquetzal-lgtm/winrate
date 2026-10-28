@@ -104,6 +104,7 @@ function renderCalc({ syncInputs = true } = {}) {
   const locked = lastLock?.locked;
   $("btnWin").disabled = insufficient || locked;
   $("btnLose").disabled = insufficient || locked;
+  $("btnTie").disabled = insufficient || locked;
 }
 
 function renderHearts(lock, animateLoss = false) {
@@ -193,11 +194,39 @@ function applyCustom() {
 }
 
 // ---------------- Registrar resultado ----------------
+/** Pide la cantidad real ganada/perdida (prellenada con la calculada). Devuelve el entero o null si se cancela. */
+async function askAmount(result) {
+  const capital = toInt(state.settings.capital);
+  const p = calcProjection(capital, state.settings.bullets, state.settings.ratio);
+  const isWin = result === "win";
+  const calc = isWin ? p.gain : p.invested;
+  const res = await openModal({
+    variant: isWin ? "win" : "lose",
+    tag: isWin ? "¿CUANTO GANASTE?" : "¿CUANTO PERDISTE?",
+    text: isWin ? "Escribe las Coins que realmente ganaste en la ronda." : "Escribe las Coins que realmente perdiste en la ronda.",
+    sub: `Calculado: ${isWin ? "+" : "−"}${fmt(calc)} · Capital: ${fmt(capital)}`,
+    fields: [{ id: "amount", label: isWin ? "GANANCIA REAL (COINS)" : "PERDIDA REAL (COINS)", inputmode: "numeric", big: true, value: String(calc), select: true }],
+    validate: (v) => {
+      if (!/^\d+$/.test(v.amount) || parseInt(v.amount, 10) <= 0) return "Escribe una cantidad entera mayor a 0.";
+      if (!isWin && parseInt(v.amount, 10) > capital) return `No puedes perder más de tu capital (${fmt(capital)}).`;
+      return null;
+    },
+    buttons: [{ label: "CANCELAR", value: false }, { label: "CONFIRMAR", value: true, primary: true }],
+  });
+  return res?.value ? parseInt(res.fields.amount, 10) : null;
+}
+
 async function onResult(result) {
-  const btn = result === "win" ? $("btnWin") : $("btnLose");
+  const btn = { win: $("btnWin"), lose: $("btnLose"), tie: $("btnTie") }[result];
   if (btn.disabled) return;
+  sfx.click();
+  let amount;
+  if (result !== "tie") {
+    amount = await askAmount(result);
+    if (amount === null) return;
+  }
   const before = toInt(state.settings.capital);
-  const res = recordResult(state, result, Date.now());
+  const res = recordResult(state, result, Date.now(), amount);
   if (!res.ok) {
     if (res.reason === "locked") renderCalc();
     return;
@@ -219,6 +248,8 @@ async function onResult(result) {
     sfx.win();
     flash();
     burst(rect.left + rect.width / 2, rect.top + rect.height / 3, [cs.getPropertyValue("--red").trim(), cs.getPropertyValue("--red-hi").trim(), "#ffffff", "#c9ced8"], 90);
+  } else if (result === "tie") {
+    sfx.tie();
   } else {
     shake();
     if (res.scenario === "lock") sfx.lock();
@@ -228,9 +259,9 @@ async function onResult(result) {
   const scenario = res.scenario;
   const idx = pickPhraseIndex(scenario, lastPhrase[scenario]);
   lastPhrase[scenario] = idx;
-  const tags = { win: "ROUND WIN", lose1: "ROUND LOST · 1 VIDA", lock: "GAME OVER · SYSTEM LOCKED" };
+  const tags = { win: "ROUND WIN", tie: "ROUND TIE · CAPITAL INTACTO", lose1: "ROUND LOST · 1 VIDA", lock: "GAME OVER · SYSTEM LOCKED" };
   await openModal({
-    variant: scenario === "win" ? "win" : scenario === "lock" ? "lock" : "lose",
+    variant: { win: "win", tie: "tie", lock: "lock" }[scenario] || "lose",
     tag: tags[scenario],
     big: signed(res.record.delta) + " COINS",
     text: PHRASES[scenario][idx],
@@ -280,12 +311,17 @@ async function onMovement(type) {
 }
 
 // ---------------- Win-Rate ----------------
+const RESULT_LABEL = { win: "WIN", lose: "LOSE", tie: "TIE" };
+// "W 2L" con la T solo si hubo empates
+const wlt = (w) => `${w.wins}W ${w.losses}L${w.ties ? ` ${w.ties}T` : ""}`;
+
 function recordCard(r, lastId) {
+  const calc = r.expected !== undefined && r.expected !== r.delta ? `<span class="rec-calc">CALC <b>${signed(r.expected)}</b></span>` : "";
   return `<div class="hud rec ${r.result}${r.id === newRecordId ? " is-new" : ""}">
-        <div class="badge ${r.result}">${r.result === "win" ? "WIN" : "LOSE"}</div>
+        <div class="badge ${r.result}">${RESULT_LABEL[r.result]}</div>
         <div class="rec-time">${timeLabel(r.ts)}</div>
         <div class="rec-delta">${signed(r.delta)}</div>
-        <div class="rec-detail"><span>CAP <b>${fmt(r.capitalBefore)}</b> » <b>${fmt(r.capitalAfter)}</b></span><span>INV <b>${fmt(r.invested)}</b></span><span>PAGO <b>${formatRatio(r.ratio)}</b></span></div>
+        <div class="rec-detail"><span>CAP <b>${fmt(r.capitalBefore)}</b> » <b>${fmt(r.capitalAfter)}</b></span><span>INV <b>${fmt(r.invested)}</b></span><span>PAGO <b>${formatRatio(r.ratio)}</b></span>${calc}</div>
         ${r.id === lastId ? `<button class="rec-undo" data-undo="${esc(r.id)}">UNDO</button>` : ""}
       </div>`;
 }
@@ -303,12 +339,13 @@ function movementCard(m, lastId) {
 
 function renderWinRate() {
   const all = winRate(state.records);
-  $("wrGlobal").textContent = all.total ? all.pct.toFixed(1) + "%" : "--.-%";
+  $("wrGlobal").textContent = all.pct !== null ? all.pct.toFixed(1) + "%" : "--.-%";
   $("wrWins").textContent = all.wins;
   $("wrLosses").textContent = all.losses;
+  $("wrTies").textContent = all.ties;
   $("wrTotal").textContent = all.total;
   const today = winRate(dayRecords(state.records, dayKey(Date.now())));
-  $("wrToday").textContent = today.total ? `${today.pct.toFixed(1)}% (${today.wins}W ${today.losses}L)` : "SIN REGISTROS";
+  $("wrToday").textContent = today.total ? `${today.pct === null ? "--" : today.pct.toFixed(1) + "%"} (${wlt(today)})` : "SIN REGISTROS";
 
   document.querySelectorAll("[data-filter]").forEach((b) => b.classList.toggle("is-active", b.dataset.filter === histFilter));
   const list = $("recordList");
@@ -330,7 +367,7 @@ function renderWinRate() {
     const recs = items.filter((x) => x.kind === "record").map((x) => x.e);
     if (recs.length) {
       const w = winRate(recs);
-      html += `<div class="day-sep"><span>${dayLabel(key, true)} · ${w.wins}W ${w.losses}L</span><span class="net">${signed(sumDelta(recs))}</span></div>`;
+      html += `<div class="day-sep"><span>${dayLabel(key, true)} · ${wlt(w)}</span><span class="net">${signed(sumDelta(recs))}</span></div>`;
     } else {
       html += `<div class="day-sep moves-only"><span>${dayLabel(key, true)}</span><span class="net">BANCO</span></div>`;
     }
@@ -346,7 +383,7 @@ async function onUndo() {
   const last = le.entry;
   sfx.click();
   const what = le.kind === "record"
-    ? `${last.result === "win" ? "WIN" : "LOSE"} ${signed(last.delta)}`
+    ? `${RESULT_LABEL[last.result]} ${signed(last.delta)}`
     : `${last.type === "deposit" ? "ABONO +" : "RETIRO −"}${fmt(last.amount)}`;
   const ok = await openModal({
     variant: "lose",
@@ -389,9 +426,9 @@ function renderStats() {
   ];
   $("lifeBars").innerHTML = bars.map(([cls, label, w]) => `
     <div class="lifebar ${cls}">
-      <div class="lb-head"><span>${label}</span><span class="lb-pct">${w.total ? w.pct.toFixed(1) + "%" : "--"}</span></div>
-      <div class="lb-track"><div class="lb-fill" style="width:0%" data-w="${w.total ? w.pct : 0}"></div></div>
-      <div class="lb-wl">${w.wins}W · ${w.losses}L</div>
+      <div class="lb-head"><span>${label}</span><span class="lb-pct">${w.pct !== null ? w.pct.toFixed(1) + "%" : "--"}</span></div>
+      <div class="lb-track"><div class="lb-fill" style="width:0%" data-w="${w.pct ?? 0}"></div></div>
+      <div class="lb-wl">${w.wins}W · ${w.losses}L${w.ties ? ` · ${w.ties}T` : ""}</div>
     </div>`).join("");
   requestAnimationFrame(() => requestAnimationFrame(() => {
     document.querySelectorAll(".lb-fill").forEach((el) => (el.style.width = el.dataset.w + "%"));
@@ -536,7 +573,10 @@ function openModal({ variant = "", tag = "", big = "", text = "", typewriter = f
       textEl.textContent = text;
     }
     const firstInput = root.querySelector("input");
-    if (firstInput) setTimeout(() => firstInput.focus(), 50);
+    if (firstInput) setTimeout(() => {
+      firstInput.focus();
+      if (fields[0]?.select) firstInput.select();
+    }, 50);
 
     const close = (value) => {
       if (typing) clearInterval(typing);
@@ -734,6 +774,7 @@ function init() {
     renderWinRate();
   }));
   $("btnWin").addEventListener("click", () => onResult("win"));
+  $("btnTie").addEventListener("click", () => onResult("tie"));
   $("btnLose").addEventListener("click", () => onResult("lose"));
   $("recordList").addEventListener("click", (e) => { if (e.target.closest("[data-undo]")) onUndo(); });
   document.querySelectorAll(".tab-btn").forEach((b) => b.addEventListener("click", () => { sfx.click(); showTab(b.dataset.tab); }));

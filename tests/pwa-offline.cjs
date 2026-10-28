@@ -42,7 +42,9 @@ const BASE = process.argv[2] || "http://127.0.0.1:8765/";
   await page.fill("#mf_capital", "1000");
   await page.click(".modal-btns .primary");
   await page.click("#btnWin");
-  await page.click(".modal-btns .primary");
+  await page.click(".modal-btns .primary"); // cantidad (calculada)
+  await page.waitForSelector(".modal.win .modal-tag");
+  await page.click(".modal-btns .primary"); // pop-up de victoria
   await page.waitForTimeout(900); // fin de la animación del contador
   res.capitalAfterWin = await page.inputValue("#inCapital");
   res.networkBlocked = await page.evaluate(() => fetch("/no-cacheado-" + Date.now()).then(() => false, () => true));

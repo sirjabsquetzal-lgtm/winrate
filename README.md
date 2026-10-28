@@ -52,7 +52,11 @@ node tests/e2e.cjs && node tests/pwa-offline.cjs && node tests/screenshots.cjs
 3. Toca **Instalar app**. Si no aparece, usa **Agregar a pantalla principal → Instalar**.
 4. Confirma con **Instalar**. El icono aparece en el cajón de apps.
 
-## Abonos y retiros
+## Registrar una ronda (WIN / TIE / LOSE)
+
+- **WIN** y **LOSE** abren primero un pop-up con la cantidad **calculada** ya escrita (ganancia o inversión). Si el juego pagó o quitó otra cantidad, escríbela y presiona **CONFIRMAR**; luego sale el pop-up normal de victoria o derrota. **CANCELAR** no registra nada. En el historial, si la cantidad real fue distinta, se ve también la calculada (`CALC +100`).
+- **TIE** (empate) registra la ronda sin cambiar el capital y **no gasta vida**. El win rate es **W / (W + L)**: los empates se cuentan aparte (T) y no bajan ni suben el porcentaje, ni rompen rachas.
+
 
 En **Calculator**, debajo del capital, hay dos botones:
 - **+ ABONAR**: Coins que compraste y agregas a tu capital.
@@ -62,6 +66,6 @@ Los movimientos cambian el capital, pero **no cuentan para el win rate, las rach
 
 ## Datos
 
-- Todo se guarda **solo en el celular** (`localStorage`, clave `winrate.v1`, `schemaVersion: 2`; los datos de la v1 se migran solos). Borrar los datos del navegador o desinstalar la app los elimina.
+- Todo se guarda **solo en el celular** (`localStorage`, clave `winrate.v1`, `schemaVersion: 3`; los datos de versiones anteriores se migran solos). Borrar los datos del navegador o desinstalar la app los elimina.
 - Haz respaldos con **⚙ → EXPORTAR .JSON** (`winrate-<jugador>-<YYYY-MM-DD>.json`) y restáuralos con **IMPORTAR .JSON**.
 - En iPhone, la app instalada y Safari tienen almacenamientos **separados**: registra siempre desde la app instalada.

@@ -104,7 +104,7 @@ test("undo desbloquea y restaura capital", () => {
 
 console.log("Frases");
 test("nunca repite la misma frase dos veces seguidas", () => {
-  for (const sc of ["win", "lose1", "lock"]) {
+  for (const sc of ["win", "tie", "lose1", "lock"]) {
     assert.equal(L.PHRASES[sc].length, 5);
     let last;
     for (let i = 0; i < 500; i++) {
@@ -125,7 +125,7 @@ test("export → import idéntico", () => {
   const v = L.validateImport(JSON.parse(json));
   assert.equal(v.ok, true);
   assert.deepEqual(v.state, s);
-  assert.equal(JSON.parse(json).schemaVersion, 2);
+  assert.equal(JSON.parse(json).schemaVersion, 3);
 });
 test("import rechaza schemaVersion incorrecto y registros corruptos", () => {
   assert.equal(L.validateImport({ schemaVersion: 99, settings: {}, records: [] }).ok, false);
@@ -134,6 +134,63 @@ test("import rechaza schemaVersion incorrecto y registros corruptos", () => {
   const bad = { schemaVersion: 1, settings: {}, records: [{ id: "x", ts: 1, dayKey: "2026-01-01", capitalBefore: 100, bullets: 20, ratio: 2, invested: 5, result: "win", delta: 10, capitalAfter: 999 }] };
   assert.equal(L.validateImport(bad).ok, false);
   assert.equal(L.validateImport("hola").ok, false);
+});
+
+console.log("Empate y cantidad real");
+test("TIE: capital igual, no gasta vida, no entra al win rate", () => {
+  let s = withSettings({ capital: 1000 });
+  const r = L.recordResult(s, "tie", at(2026, 10, 26, 10));
+  assert.equal(r.ok, true);
+  assert.equal(r.scenario, "tie");
+  assert.deepEqual([r.record.delta, r.record.capitalAfter, r.record.expected, r.record.invested], [0, 1000, 0, 50]);
+  s = r.state;
+  s = L.recordResult(s, "win", at(2026, 10, 26, 11)).state;
+  s = L.recordResult(s, "lose", at(2026, 10, 26, 12)).state;
+  const wr = L.winRate(s.records);
+  assert.deepEqual([wr.wins, wr.losses, wr.ties, wr.decided, wr.total, wr.pct], [1, 1, 1, 2, 3, 50]);
+  assert.equal(L.lockStatus(s.records, at(2026, 10, 26, 13)).lives, 1);
+});
+test("TIE no rompe ni suma rachas", () => {
+  let s = withSettings({ capital: 1000 });
+  for (const [res, h] of [["win", 10], ["tie", 11], ["win", 12], ["tie", 13]]) s = L.recordResult(s, res, at(2026, 10, 26, h)).state;
+  const st = L.streaks(s.records);
+  assert.equal(st.bestWin, 2);
+  assert.deepEqual(st.current, { type: "win", count: 2 });
+});
+test("TIE bloqueado también se rechaza", () => {
+  let s = withSettings({ capital: 1000 });
+  s = L.recordResult(s, "lose", at(2026, 10, 26, 10)).state;
+  s = L.recordResult(s, "lose", at(2026, 10, 26, 11)).state;
+  assert.equal(L.recordResult(s, "tie", at(2026, 10, 26, 12)).reason, "locked");
+});
+test("WIN con cantidad real distinta a la calculada", () => {
+  const r = L.recordResult(withSettings({ capital: 1000, bullets: 20, ratio: 2 }), "win", at(2026, 10, 26, 10), 103);
+  assert.equal(r.ok, true);
+  assert.deepEqual([r.record.expected, r.record.delta, r.record.capitalAfter, r.state.settings.capital], [100, 103, 1103, 1103]);
+});
+test("LOSE con cantidad real; límites", () => {
+  const s = withSettings({ capital: 1000 });
+  const r = L.recordResult(s, "lose", at(2026, 10, 26, 10), 52);
+  assert.deepEqual([r.record.expected, r.record.delta, r.record.capitalAfter], [-50, -52, 948]);
+  assert.equal(L.recordResult(s, "lose", at(2026, 10, 26, 10), 1001).reason, "exceeds");
+  assert.equal(L.recordResult(s, "win", at(2026, 10, 26, 10), 0).reason, "amount");
+  assert.equal(L.recordResult(s, "win", at(2026, 10, 26, 10), 2.5).reason, "amount");
+  assert.equal(L.recordResult(s, "lose", at(2026, 10, 26, 10), -3).reason, "amount");
+});
+test("sin cantidad usa la calculada (compatibilidad)", () => {
+  const r = L.recordResult(withSettings({ capital: 1000 }), "win", at(2026, 10, 26, 10));
+  assert.equal(r.record.delta, 100);
+});
+test("import valida empates y signos", () => {
+  let s = withSettings({ capital: 1000 });
+  s = L.recordResult(s, "tie", at(2026, 10, 26, 10)).state;
+  s = L.recordResult(s, "win", at(2026, 10, 26, 11), 107).state;
+  const v = L.validateImport(JSON.parse(L.exportState(s)));
+  assert.equal(v.ok, true);
+  assert.deepEqual(v.state, s);
+  const bad = JSON.parse(L.exportState(s));
+  bad.records[0].delta = 5; bad.records[0].capitalAfter = 1005; // empate con delta ≠ 0
+  assert.equal(L.validateImport(bad).ok, false);
 });
 
 console.log("Abonos y retiros");
@@ -212,7 +269,8 @@ test("export → import con movimientos idéntico; v1 se migra", () => {
   const v1 = { schemaVersion: 1, settings: s.settings, records: s.records };
   const m = L.validateImport(v1);
   assert.equal(m.ok, true);
-  assert.equal(m.state.schemaVersion, 2);
+  assert.equal(m.state.schemaVersion, 3);
+  assert.equal(m.state.records[0].expected, m.state.records[0].delta); // v1 sin `expected`
   assert.deepEqual(m.state.movements, []);
   assert.deepEqual(L.migrate(v1).movements, []);
   assert.equal(L.migrate(v1).records.length, 1);

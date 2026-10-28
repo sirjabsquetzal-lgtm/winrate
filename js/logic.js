@@ -1,7 +1,9 @@
 // WinRate — lógica pura (sin DOM). Se usa en la app y en los tests de Node.
 
-export const SCHEMA_VERSION = 2; // v2: agrega `movements` (abonos y retiros)
-export const APP_VERSION = "1.1.0";
+// v2: agrega `movements` (abonos y retiros) · v3: resultado "tie" y `expected` (cantidad calculada) en cada ronda
+export const SCHEMA_VERSION = 3;
+export const SUPPORTED_SCHEMAS = [1, 2, 3];
+export const APP_VERSION = "1.2.0";
 export const MAX_LOSSES_PER_DAY = 2;
 export const DAY_START_HOUR = 6;
 export const RATIO_PRESETS = ["1.5", "2", "3"];
@@ -147,12 +149,24 @@ function newId(ts) {
   return `${ts.toString(36)}-${idCounter.toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+export const RESULTS = ["win", "lose", "tie"];
+
+/** Valida la cantidad real ganada/perdida que escribe el usuario. Devuelve null si es válida o el motivo. */
+export function checkAmount(result, amount, capitalBefore) {
+  if (result === "tie") return null;
+  if (!Number.isInteger(amount) || amount <= 0) return "amount";
+  if (result === "lose" && amount > capitalBefore) return "exceeds";
+  return null;
+}
+
 /**
- * Registra un resultado. Devuelve { ok, state, record, scenario } o { ok:false, reason }.
- * scenario: "win" | "lose1" | "lock"
+ * Registra un resultado. `amount` es la cantidad real ganada o perdida (entero > 0);
+ * si se omite se usa la calculada. Un "tie" siempre tiene delta 0.
+ * Devuelve { ok, state, record, scenario } o { ok:false, reason }.
+ * scenario: "win" | "tie" | "lose1" | "lock"
  */
-export function recordResult(state, result, now) {
-  if (result !== "win" && result !== "lose") return { ok: false, reason: "result" };
+export function recordResult(state, result, now, amount) {
+  if (!RESULTS.includes(result)) return { ok: false, reason: "result" };
   const lock = lockStatus(state.records, now);
   if (lock.locked) return { ok: false, reason: "locked" };
   const s = state.settings;
@@ -162,7 +176,11 @@ export function recordResult(state, result, now) {
     return { ok: false, reason: "invalid" };
   const p = calcProjection(capitalBefore, bullets, s.ratio);
   if (p.invested <= 0) return { ok: false, reason: "insufficient" };
-  const delta = result === "win" ? p.gain : -p.invested;
+  const expected = result === "win" ? p.gain : result === "lose" ? -p.invested : 0;
+  const real = amount === undefined || amount === null ? Math.abs(expected) : amount;
+  const bad = checkAmount(result, real, capitalBefore);
+  if (bad) return { ok: false, reason: bad };
+  const delta = result === "win" ? real : result === "lose" ? -real : 0;
   const record = {
     id: newId(now),
     ts: now,
@@ -172,12 +190,13 @@ export function recordResult(state, result, now) {
     ratio: s.ratio,
     invested: p.invested,
     result,
+    expected,
     delta,
     capitalAfter: capitalBefore + delta,
   };
   const records = [...state.records, record];
   const next = { ...state, settings: { ...s, capital: record.capitalAfter }, records };
-  let scenario = "win";
+  let scenario = result;
   if (result === "lose") scenario = lossesOnDay(records, record.dayKey) >= MAX_LOSSES_PER_DAY ? "lock" : "lose1";
   return { ok: true, state: next, record, scenario };
 }
@@ -255,6 +274,13 @@ export const PHRASES = {
     "Hoy se protege el capital. Sal a vivir, mañana hay revancha.",
     "Límite alcanzado. Apaga la pantalla, el mercado sigue mañana.",
   ],
+  tie: [
+    "Empate. Capital intacto, sigue con el plan.",
+    "Ni ganas ni pierdes: ronda neutral. Respira y sigue.",
+    "Tablas. No perder también es jugar bien.",
+    "Ronda neutra. Mantén la calma y el enfoque.",
+    "Empate técnico. Coins a salvo, siguiente ronda.",
+  ],
 };
 
 /** Elige un índice al azar distinto de `lastIdx`. */
@@ -286,10 +312,17 @@ export function validateRecord(r) {
     isNum(r.ts) && typeof r.dayKey === "string" && KEY_RE.test(r.dayKey) &&
     isInt(r.capitalBefore) && isInt(r.bullets) && r.bullets > 0 &&
     isNum(r.ratio) && r.ratio > 0 && isInt(r.invested) && r.invested >= 0 &&
-    (r.result === "win" || r.result === "lose") &&
-    isInt(r.delta) && isInt(r.capitalAfter) && r.capitalAfter === r.capitalBefore + r.delta
+    RESULTS.includes(r.result) &&
+    isInt(r.delta) && isInt(r.capitalAfter) && r.capitalAfter === r.capitalBefore + r.delta &&
+    (r.result !== "tie" || r.delta === 0) &&
+    (r.result !== "win" || r.delta >= 0) &&
+    (r.result !== "lose" || r.delta <= 0) &&
+    (r.expected === undefined || isInt(r.expected))
   );
 }
+
+// v1/v2 no guardaban `expected`: en esas rondas la cantidad real era la calculada
+const normRecord = (r) => ({ ...r, expected: r.expected ?? r.delta });
 
 export function validateMovement(m) {
   return (
@@ -321,8 +354,8 @@ export function sanitizeSettings(s) {
 /** Valida un objeto importado. Devuelve { ok, state } o { ok:false, error }. */
 export function validateImport(data) {
   if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false, error: "El archivo no es un objeto JSON válido." };
-  if (data.schemaVersion !== 1 && data.schemaVersion !== SCHEMA_VERSION)
-    return { ok: false, error: `schemaVersion no soportado (${data.schemaVersion ?? "ausente"}). Se esperaba 1 o ${SCHEMA_VERSION}.` };
+  if (!SUPPORTED_SCHEMAS.includes(data.schemaVersion))
+    return { ok: false, error: `schemaVersion no soportado (${data.schemaVersion ?? "ausente"}). Se esperaba ${SUPPORTED_SCHEMAS.join(", ")}.` };
   if (!data.settings || typeof data.settings !== "object") return { ok: false, error: "Falta el bloque 'settings'." };
   if (!Array.isArray(data.records)) return { ok: false, error: "Falta la lista 'records'." };
   for (let i = 0; i < data.records.length; i++) {
@@ -334,7 +367,7 @@ export function validateImport(data) {
   for (let i = 0; i < rawMov.length; i++) {
     if (!validateMovement(rawMov[i])) return { ok: false, error: `Movimiento #${i + 1} inválido.` };
   }
-  const records = [...data.records].sort((a, b) => a.ts - b.ts);
+  const records = data.records.map(normRecord).sort((a, b) => a.ts - b.ts);
   const movements = rawMov.map((m) => ({ ...m, note: m.note ?? "" })).sort((a, b) => a.ts - b.ts);
   return { ok: true, state: { schemaVersion: SCHEMA_VERSION, settings: sanitizeSettings(data.settings), records, movements } };
 }
@@ -342,18 +375,20 @@ export function validateImport(data) {
 /** Normaliza lo leído de localStorage (con migración futura por schemaVersion). */
 export function migrate(raw) {
   if (!raw || typeof raw !== "object") return defaultState();
-  if (raw.schemaVersion !== 1 && raw.schemaVersion !== SCHEMA_VERSION) return defaultState();
-  const records = Array.isArray(raw.records) ? raw.records.filter(validateRecord) : [];
+  if (!SUPPORTED_SCHEMAS.includes(raw.schemaVersion)) return defaultState();
+  const records = Array.isArray(raw.records) ? raw.records.filter(validateRecord).map(normRecord) : [];
   // v1 → v2: se agrega la lista de movimientos vacía
   const movements = Array.isArray(raw.movements) ? raw.movements.filter(validateMovement).map((m) => ({ ...m, note: m.note ?? "" })) : [];
   return { schemaVersion: SCHEMA_VERSION, settings: sanitizeSettings(raw.settings), records, movements };
 }
 
 // ---------- Estadísticas ----------
+/** Win rate = W / (W + L). Los empates se cuentan aparte y no entran al porcentaje. */
 export function winRate(list) {
   const wins = list.filter((r) => r.result === "win").length;
-  const total = list.length;
-  return { wins, losses: total - wins, total, pct: total ? (wins / total) * 100 : null };
+  const losses = list.filter((r) => r.result === "lose").length;
+  const decided = wins + losses;
+  return { wins, losses, ties: list.length - decided, decided, total: list.length, pct: decided ? (wins / decided) * 100 : null };
 }
 
 export function groupBy(records, keyFn) {
@@ -399,6 +434,7 @@ export function capitalSeries(records, movements = []) {
 export function streaks(records) {
   let bestWin = 0, worstLose = 0, cur = 0, curType = null;
   for (const r of records) {
+    if (r.result === "tie") continue; // un empate no suma ni rompe rachas
     if (r.result === curType) cur++;
     else { curType = r.result; cur = 1; }
     if (curType === "win") bestWin = Math.max(bestWin, cur);

@@ -31,7 +31,8 @@ async function demoState(theme) {
       if (L.dayKey(ts) === todayKey) continue;
       const ratios = [1.5, 2, 2, 3];
       s.settings.ratio = ratios[Math.floor(rnd() * ratios.length)];
-      const r = L.recordResult(s, rnd() < 0.5 ? "win" : "lose", ts);
+      const roll = rnd();
+      const r = L.recordResult(s, roll < 0.07 ? "tie" : roll < 0.54 ? "win" : "lose", ts);
       if (!r.ok) break;
       s = r.state;
     }
@@ -79,17 +80,33 @@ async function demoState(theme) {
     await page.click(".modal-btns .primary");
     await page.waitForTimeout(900);
 
+    // WIN: primero el pop-up de cantidad real
     await page.click("#btnWin");
+    await page.waitForSelector("#mf_amount");
+    await page.fill("#mf_amount", String(Number(await page.inputValue("#mf_amount")) + 4));
+    await page.waitForTimeout(300);
+    await shot("4a-modal-cantidad-win");
+    await page.click(".modal-btns .primary");
     await page.waitForTimeout(2600);
     await shot("4-modal-win");
     await page.click(".modal-btns .primary");
 
+    await page.click("#btnTie");
+    await page.waitForTimeout(2600);
+    await shot("4b-modal-tie");
+    await page.click(".modal-btns .primary");
+
     await page.click("#btnLose");
+    await page.waitForSelector("#mf_amount");
+    await page.waitForTimeout(300);
+    await shot("5a-modal-cantidad-lose");
+    await page.click(".modal-btns .primary");
     await page.waitForTimeout(3200);
     await shot("5-modal-lose");
     await page.click(".modal-btns .primary");
 
     await page.click("#btnLose");
+    await page.click(".modal-btns .primary");
     await page.waitForTimeout(3200);
     await shot("6-modal-lock");
     await page.click(".modal-btns .primary");

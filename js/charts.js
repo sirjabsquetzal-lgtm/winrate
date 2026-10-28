@@ -93,8 +93,8 @@ export function renderCharts(records, todayKey, movements = []) {
             pointRadius: s.map((p) => (p.movement ? 6 : s.length > 40 ? 0 : 3)),
             pointStyle: s.map((p) => (p.movement === "deposit" ? "triangle" : p.movement === "withdraw" ? "triangle" : "rect")),
             pointRotation: s.map((p) => (p.movement === "withdraw" ? 180 : 0)),
-            pointBackgroundColor: s.map((p) => (p.movement === "deposit" ? t.silver : p.movement === "withdraw" ? t.bg : p.result === "lose" ? t.silver : t.red)),
-            pointBorderColor: s.map((p) => (p.movement === "deposit" ? t.text : p.movement ? t.red : p.result === "lose" ? t.silver : t.red)),
+            pointBackgroundColor: s.map((p) => (p.movement === "deposit" ? t.silver : p.movement === "withdraw" ? t.bg : p.result === "lose" ? t.silver : p.result === "tie" ? t.silverDim : t.red)),
+            pointBorderColor: s.map((p) => (p.movement === "deposit" ? t.text : p.movement ? t.red : p.result === "lose" ? t.silver : p.result === "tie" ? t.silverDim : t.red)),
             pointBorderWidth: s.map((p) => (p.movement ? 2 : 1)),
             fill: true,
             backgroundColor: (ctx) => {
@@ -130,7 +130,7 @@ export function renderCharts(records, todayKey, movements = []) {
         title: (items) => `DÍA ${m[items[0].dataIndex].dayKey.slice(8)}`,
         label: (item) => {
           const d = m[item.dataIndex];
-          return `${d.pct.toFixed(1)}% · ${d.wins}W ${d.losses}L`;
+          return `${d.pct === null ? "--" : d.pct.toFixed(1) + "%"} · ${d.wins}W ${d.losses}L${d.ties ? ` ${d.ties}T` : ""}`;
         },
       };
       charts[id] = new Chart(cv, {
@@ -171,7 +171,8 @@ export function renderCharts(records, todayKey, movements = []) {
       o.plugins.tooltip.callbacks = {
         label: (item) => {
           const d = y[item.dataIndex];
-          return d.total ? `${d.pct.toFixed(1)}% · ${d.wins}W ${d.losses}L` : "sin actividad";
+          if (!d.total) return "sin actividad";
+          return `${d.pct === null ? "--" : d.pct.toFixed(1) + "%"} · ${d.wins}W ${d.losses}L${d.ties ? ` ${d.ties}T` : ""}`;
         },
       };
       charts[id] = new Chart(cv, {
@@ -179,7 +180,7 @@ export function renderCharts(records, todayKey, movements = []) {
         data: {
           labels: MONTHS.map((mm) => mm.slice(0, 1)),
           datasets: [{
-            data: y.map((d) => (d.total ? d.pct : null)),
+            data: y.map((d) => d.pct),
             backgroundColor: y.map((d, i) => (i === Number(todayKey.slice(5, 7)) - 1 ? t.red : alpha(t.red, 0.55))),
             borderColor: t.red, borderWidth: 1, borderSkipped: false,
             barPercentage: 0.8, categoryPercentage: 0.9,
@@ -235,13 +236,13 @@ export function renderCharts(records, todayKey, movements = []) {
     const wr = winRate(records);
     setEmpty(cv, wr.total === 0);
     const center = document.getElementById("donutCenter");
-    center.innerHTML = wr.total ? `<div><b>${wr.pct.toFixed(1)}%</b>${wr.wins}W · ${wr.losses}L</div>` : "";
+    center.innerHTML = wr.total ? `<div><b>${wr.pct === null ? "--" : wr.pct.toFixed(1) + "%"}</b>${wr.wins}W · ${wr.losses}L${wr.ties ? ` · ${wr.ties}T` : ""}</div>` : "";
     if (wr.total) {
       charts[id] = new Chart(cv, {
         type: "doughnut",
         data: {
-          labels: ["WINS", "LOSSES"],
-          datasets: [{ data: [wr.wins, wr.losses], backgroundColor: [t.red, t.silver], borderColor: t.panel, borderWidth: 3, hoverOffset: 6 }],
+          labels: ["WINS", "LOSSES", "TIES"],
+          datasets: [{ data: [wr.wins, wr.losses, wr.ties], backgroundColor: [t.red, t.silver, t.silverDim], borderColor: t.panel, borderWidth: 3, hoverOffset: 6 }],
         },
         options: {
           responsive: true, maintainAspectRatio: false, cutout: "68%",
