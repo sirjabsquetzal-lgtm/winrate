@@ -3,7 +3,7 @@
 // v2: agrega `movements` (abonos y retiros) · v3: resultado "tie" y `expected` (cantidad calculada) en cada ronda
 export const SCHEMA_VERSION = 3;
 export const SUPPORTED_SCHEMAS = [1, 2, 3];
-export const APP_VERSION = "1.2.0";
+export const APP_VERSION = "1.2.1";
 export const MAX_LOSSES_PER_DAY = 2;
 export const DAY_START_HOUR = 6;
 export const RATIO_PRESETS = ["1.5", "2", "3"];
@@ -151,17 +151,23 @@ function newId(ts) {
 
 export const RESULTS = ["win", "lose", "tie"];
 
-/** Valida la cantidad real ganada/perdida que escribe el usuario. Devuelve null si es válida o el motivo. */
+/**
+ * Valida la cantidad real que escribe el usuario. Devuelve null si es válida o el motivo.
+ * WIN/LOSE: magnitud entera > 0. TIE: delta con signo (comisión negativa o pequeña ganancia), puede ser 0.
+ */
 export function checkAmount(result, amount, capitalBefore) {
-  if (result === "tie") return null;
+  if (result === "tie") {
+    if (!Number.isInteger(amount)) return "amount";
+    return -amount > capitalBefore ? "exceeds" : null;
+  }
   if (!Number.isInteger(amount) || amount <= 0) return "amount";
   if (result === "lose" && amount > capitalBefore) return "exceeds";
   return null;
 }
 
 /**
- * Registra un resultado. `amount` es la cantidad real ganada o perdida (entero > 0);
- * si se omite se usa la calculada. Un "tie" siempre tiene delta 0.
+ * Registra un resultado. `amount` es la cantidad real: en WIN/LOSE la magnitud ganada o perdida (entero > 0);
+ * en TIE el cambio con signo (p. ej. −3 por comisión). Si se omite se usa la calculada (TIE = 0).
  * Devuelve { ok, state, record, scenario } o { ok:false, reason }.
  * scenario: "win" | "tie" | "lose1" | "lock"
  */
@@ -177,10 +183,10 @@ export function recordResult(state, result, now, amount) {
   const p = calcProjection(capitalBefore, bullets, s.ratio);
   if (p.invested <= 0) return { ok: false, reason: "insufficient" };
   const expected = result === "win" ? p.gain : result === "lose" ? -p.invested : 0;
-  const real = amount === undefined || amount === null ? Math.abs(expected) : amount;
+  const real = amount === undefined || amount === null ? (result === "tie" ? 0 : Math.abs(expected)) : amount;
   const bad = checkAmount(result, real, capitalBefore);
   if (bad) return { ok: false, reason: bad };
-  const delta = result === "win" ? real : result === "lose" ? -real : 0;
+  const delta = result === "win" ? real : result === "lose" ? -real : real;
   const record = {
     id: newId(now),
     ts: now,
@@ -275,11 +281,11 @@ export const PHRASES = {
     "Límite alcanzado. Apaga la pantalla, el mercado sigue mañana.",
   ],
   tie: [
-    "Empate. Capital intacto, sigue con el plan.",
-    "Ni ganas ni pierdes: ronda neutral. Respira y sigue.",
+    "Empate. Tus vidas siguen intactas, sigue con el plan.",
+    "Ronda neutral. Respira y sigue.",
     "Tablas. No perder también es jugar bien.",
     "Ronda neutra. Mantén la calma y el enfoque.",
-    "Empate técnico. Coins a salvo, siguiente ronda.",
+    "Empate técnico. Siguiente ronda con calma.",
   ],
 };
 
@@ -314,7 +320,6 @@ export function validateRecord(r) {
     isNum(r.ratio) && r.ratio > 0 && isInt(r.invested) && r.invested >= 0 &&
     RESULTS.includes(r.result) &&
     isInt(r.delta) && isInt(r.capitalAfter) && r.capitalAfter === r.capitalBefore + r.delta &&
-    (r.result !== "tie" || r.delta === 0) &&
     (r.result !== "win" || r.delta >= 0) &&
     (r.result !== "lose" || r.delta <= 0) &&
     (r.expected === undefined || isInt(r.expected))

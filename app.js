@@ -194,16 +194,40 @@ function applyCustom() {
 }
 
 // ---------------- Registrar resultado ----------------
-/** Pide la cantidad real ganada/perdida (prellenada con la calculada). Devuelve el entero o null si se cancela. */
+/**
+ * Pide la cantidad real de la ronda (prellenada con la calculada).
+ * WIN/LOSE devuelven la magnitud; TIE devuelve el cambio con signo (comisión = negativo). null si se cancela.
+ */
 async function askAmount(result) {
   const capital = toInt(state.settings.capital);
+  if (result === "tie") {
+    const res = await openModal({
+      variant: "tie",
+      tag: "EMPATE · ¿COMISION?",
+      text: "Comisión o ganancia del empate.",
+      sub: `Capital: ${fmt(capital)}`,
+      fields: [
+        { id: "sign", type: "sign", options: [["-", "- PERDI"], ["+", "+ GANE"]], value: "-" },
+        { id: "amount", label: "CANTIDAD (COINS)", inputmode: "numeric", big: true, value: "0", select: true },
+      ],
+      validate: (v) => {
+        if (!/^\d+$/.test(v.amount)) return "Escribe una cantidad entera (0 si no hubo comisión).";
+        if (v.sign === "-" && parseInt(v.amount, 10) > capital) return `No puedes perder más de tu capital (${fmt(capital)}).`;
+        return null;
+      },
+      buttons: [{ label: "CANCELAR", value: false }, { label: "CONFIRMAR", value: true, primary: true }],
+    });
+    if (!res?.value) return null;
+    const n = parseInt(res.fields.amount, 10);
+    return res.fields.sign === "-" ? -n : n;
+  }
   const p = calcProjection(capital, state.settings.bullets, state.settings.ratio);
   const isWin = result === "win";
   const calc = isWin ? p.gain : p.invested;
   const res = await openModal({
     variant: isWin ? "win" : "lose",
     tag: isWin ? "¿CUANTO GANASTE?" : "¿CUANTO PERDISTE?",
-    text: isWin ? "Escribe las Coins que realmente ganaste en la ronda." : "Escribe las Coins que realmente perdiste en la ronda.",
+    text: isWin ? "Coins ganadas en la ronda." : "Coins perdidas en la ronda.",
     sub: `Calculado: ${isWin ? "+" : "−"}${fmt(calc)} · Capital: ${fmt(capital)}`,
     fields: [{ id: "amount", label: isWin ? "GANANCIA REAL (COINS)" : "PERDIDA REAL (COINS)", inputmode: "numeric", big: true, value: String(calc), select: true }],
     validate: (v) => {
@@ -220,11 +244,8 @@ async function onResult(result) {
   const btn = { win: $("btnWin"), lose: $("btnLose"), tie: $("btnTie") }[result];
   if (btn.disabled) return;
   sfx.click();
-  let amount;
-  if (result !== "tie") {
-    amount = await askAmount(result);
-    if (amount === null) return;
-  }
+  const amount = await askAmount(result);
+  if (amount === null) return;
   const before = toInt(state.settings.capital);
   const res = recordResult(state, result, Date.now(), amount);
   if (!res.ok) {
@@ -259,7 +280,7 @@ async function onResult(result) {
   const scenario = res.scenario;
   const idx = pickPhraseIndex(scenario, lastPhrase[scenario]);
   lastPhrase[scenario] = idx;
-  const tags = { win: "ROUND WIN", tie: "ROUND TIE · CAPITAL INTACTO", lose1: "ROUND LOST · 1 VIDA", lock: "GAME OVER · SYSTEM LOCKED" };
+  const tags = { win: "ROUND WIN", tie: "ROUND TIE", lose1: "ROUND LOST · 1 VIDA", lock: "GAME OVER · SYSTEM LOCKED" };
   await openModal({
     variant: { win: "win", tie: "tie", lock: "lock" }[scenario] || "lose",
     tag: tags[scenario],
@@ -535,14 +556,15 @@ let modalResolve = null;
 function openModal({ variant = "", tag = "", big = "", text = "", typewriter = false, sub = "", fields = [], buttons = [], validate = null }) {
   return new Promise((resolve) => {
     const root = $("modalRoot");
-    const fieldsHtml = fields.map((f) => `
+    const fieldsHtml = fields.map((f) => f.type === "sign" ? `
+      <div class="seg sign-seg" id="mf_${f.id}" data-value="${esc(f.value)}">${f.options.map(([v, label]) => `<button type="button" class="chip${v === f.value ? " is-active" : ""}" data-sign="${esc(v)}">${esc(label)}</button>`).join("")}</div>` : `
       <label class="lbl field-lbl" for="mf_${f.id}">${esc(f.label)}</label>
       <input id="mf_${f.id}" class="${f.big ? "num-input" : "text-input"} modal-input" type="text" ${f.inputmode ? `inputmode="${f.inputmode}"` : ""} ${f.maxlength ? `maxlength="${f.maxlength}"` : ""} placeholder="${esc(f.placeholder || "")}" value="${esc(f.value ?? "")}" autocomplete="off" spellcheck="false" />`).join("");
     root.innerHTML = `
       <div class="hud modal ${variant}" role="dialog" aria-modal="true">
         ${tag ? `<div class="modal-tag">${esc(tag)}</div>` : ""}
         ${big ? `<div class="modal-big">${esc(big)}</div>` : ""}
-        <div class="modal-text" id="modalText"></div>
+        <div class="modal-text${typewriter ? " tw" : ""}" id="modalText"></div>
         ${sub ? `<div class="modal-sub">${esc(sub)}</div>` : ""}
         ${fieldsHtml}
         <div class="modal-sub" id="modalErr" style="color:var(--red)" hidden></div>
@@ -550,6 +572,13 @@ function openModal({ variant = "", tag = "", big = "", text = "", typewriter = f
         ${typewriter ? `<div class="modal-hint" id="modalHint">TAP PARA SALTAR >></div>` : ""}
       </div>`;
     root.hidden = false;
+    root.querySelectorAll(".sign-seg").forEach((seg) => seg.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-sign]");
+      if (!b) return;
+      sfx.click();
+      seg.dataset.value = b.dataset.sign;
+      seg.querySelectorAll("[data-sign]").forEach((x) => x.classList.toggle("is-active", x === b));
+    }));
     const textEl = $("modalText");
     let typing = null;
     if (typewriter) {
@@ -575,7 +604,7 @@ function openModal({ variant = "", tag = "", big = "", text = "", typewriter = f
     const firstInput = root.querySelector("input");
     if (firstInput) setTimeout(() => {
       firstInput.focus();
-      if (fields[0]?.select) firstInput.select();
+      if (fields.find((f) => f.type !== "sign")?.select) firstInput.select();
     }, 50);
 
     const close = (value) => {
@@ -591,7 +620,7 @@ function openModal({ variant = "", tag = "", big = "", text = "", typewriter = f
         const btn = buttons[Number(b.dataset.i)];
         sfx.click();
         if (fields.length && btn.value) {
-          const vals = Object.fromEntries(fields.map((f) => [f.id, $("mf_" + f.id).value.trim()]));
+          const vals = Object.fromEntries(fields.map((f) => [f.id, f.type === "sign" ? $("mf_" + f.id).dataset.value : $("mf_" + f.id).value.trim()]));
           const err = validate ? validate(vals) : null;
           if (err) {
             $("modalErr").textContent = err;

@@ -92,6 +92,11 @@ async function demoState(theme) {
     await page.click(".modal-btns .primary");
 
     await page.click("#btnTie");
+    await page.waitForSelector("#mf_amount");
+    await page.fill("#mf_amount", "2");
+    await page.waitForTimeout(300);
+    await shot("4c-modal-cantidad-tie");
+    await page.click(".modal-btns .primary");
     await page.waitForTimeout(2600);
     await shot("4b-modal-tie");
     await page.click(".modal-btns .primary");

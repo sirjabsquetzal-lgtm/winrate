@@ -687,8 +687,8 @@ button { cursor: pointer; touch-action: manipulation; }
 .modal-big { font-family: var(--font-num); font-size: 56px; line-height: 1; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
 .modal.win .modal-big { color: var(--red); text-shadow: 0 0 10px var(--glow); }
 .modal.lose .modal-big, .modal.lock .modal-big { color: var(--lose); }
+.modal-text.tw { min-height: 3.6em; }
 .modal-text {
-  min-height: 3.6em;
   font-family: var(--font-pixel);
   font-size: 12px;
   line-height: 1.75;
@@ -804,3 +804,4 @@ button { cursor: pointer; touch-action: manipulation; }
 .rec-calc { color: var(--text-dim); }
 .rec-calc b { color: var(--silver); }
 .amount-hint { margin-top: 6px; font-size: 18px; color: var(--text-dim); }
+.sign-seg { margin-top: 12px; }

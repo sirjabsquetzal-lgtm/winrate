@@ -150,6 +150,21 @@ test("TIE: capital igual, no gasta vida, no entra al win rate", () => {
   assert.deepEqual([wr.wins, wr.losses, wr.ties, wr.decided, wr.total, wr.pct], [1, 1, 1, 2, 3, 50]);
   assert.equal(L.lockStatus(s.records, at(2026, 10, 26, 13)).lives, 1);
 });
+test("TIE con comisión: cambia el capital pero sigue siendo empate", () => {
+  let s = withSettings({ capital: 1000 });
+  let r = L.recordResult(s, "tie", at(2026, 10, 26, 10), -3);
+  assert.deepEqual([r.record.delta, r.record.capitalAfter, r.record.expected, r.state.settings.capital], [-3, 997, 0, 997]);
+  s = r.state;
+  r = L.recordResult(s, "tie", at(2026, 10, 26, 11), 2);
+  assert.equal(r.record.capitalAfter, 999);
+  s = r.state;
+  assert.equal(L.winRate(s.records).pct, null);
+  assert.equal(L.winRate(s.records).ties, 2);
+  assert.equal(L.lockStatus(s.records, at(2026, 10, 26, 12)).lives, 2);
+  assert.equal(L.recordResult(s, "tie", at(2026, 10, 26, 12), -1000).reason, "exceeds");
+  assert.equal(L.recordResult(s, "tie", at(2026, 10, 26, 12), 1.5).reason, "amount");
+  assert.equal(L.validateImport(JSON.parse(L.exportState(s))).ok, true);
+});
 test("TIE no rompe ni suma rachas", () => {
   let s = withSettings({ capital: 1000 });
   for (const [res, h] of [["win", 10], ["tie", 11], ["win", 12], ["tie", 13]]) s = L.recordResult(s, res, at(2026, 10, 26, h)).state;
@@ -189,7 +204,8 @@ test("import valida empates y signos", () => {
   assert.equal(v.ok, true);
   assert.deepEqual(v.state, s);
   const bad = JSON.parse(L.exportState(s));
-  bad.records[0].delta = 5; bad.records[0].capitalAfter = 1005; // empate con delta ≠ 0
+  bad.records[1].delta = -5; // WIN con delta negativo
+  bad.records[1].capitalAfter = bad.records[1].capitalBefore - 5;
   assert.equal(L.validateImport(bad).ok, false);
 });
 

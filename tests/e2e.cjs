@@ -40,14 +40,28 @@ const assert = (c, m) => { if (!c) { console.log("✗", m); process.exitCode = 1
   await closeModal();
   assert((await cap()) === 1103, "capital 1000 + 103 = 1103");
 
-  // TIE: sin pop-up de cantidad, capital igual, no gasta vida
+  // TIE: pide cantidad con signo (comisión), prellena 0
   await page.click("#btnTie");
-  await page.waitForSelector(".modal.tie");
-  assert((await page.$$("#mf_amount")).length === 0, "TIE no pide cantidad");
+  await page.waitForSelector("#mf_amount");
+  assert((await page.inputValue("#mf_amount")) === "0", "TIE prellena 0");
+  assert((await page.getAttribute("#mf_sign", "data-value")) === "-", "TIE trae - PERDI seleccionado");
+  await page.click(".modal-btns button:not(.primary)");
+  assert((await page.evaluate(() => window.__winrate.state.records.length)) === 1, "CANCELAR en TIE no registra");
+  await page.click("#btnTie");
+  await page.fill("#mf_amount", "3");
+  await page.click(".modal-btns .primary");
+  await page.waitForSelector(".modal.tie .modal-tag");
   assert((await page.textContent(".modal-tag")).includes("TIE"), "pop-up de empate");
+  assert((await page.textContent(".modal-big")).includes("−3"), "empate muestra −3 de comisión");
   await closeModal();
-  assert((await cap()) === 1103, "TIE deja el capital igual");
+  assert((await cap()) === 1100, "TIE con comisión: 1103 − 3 = 1100");
   assert((await page.$$("#hearts .heart-full")).length === 2, "TIE no gasta vida");
+  await page.click("#btnTie");
+  await page.click('[data-sign="+"]');
+  await page.fill("#mf_amount", "2");
+  await page.click(".modal-btns .primary");
+  await closeModal();
+  assert((await cap()) === 1102, "TIE con + GANE: 1100 + 2 = 1102");
 
   // LOSE prellena la inversión; pierdo 57 (calculado 55)
   await page.click("#btnLose");
@@ -56,7 +70,7 @@ const assert = (c, m) => { if (!c) { console.log("✗", m); process.exitCode = 1
   await page.fill("#mf_amount", "57");
   await page.click(".modal-btns .primary");
   await closeModal();
-  assert((await cap()) === 1046, "capital 1103 − 57 = 1046");
+  assert((await cap()) === 1045, "capital 1102 − 57 = 1045");
   await page.click("#btnLose"); await closeModal(); // acepta la cantidad calculada (52)
   assert((await page.textContent(".modal-tag")).includes("SYSTEM LOCKED"), "2ª pérdida muestra modal de bloqueo");
   await closeModal();
@@ -84,13 +98,13 @@ const assert = (c, m) => { if (!c) { console.log("✗", m); process.exitCode = 1
   assert(await page.isVisible("#lockPanel"), "sigue bloqueado tras abonar/retirar");
   assert((await page.evaluate(() => window.__winrate.state.records.length)) === wrBefore, "abonos/retiros no crean rondas");
   await page.click('[data-tab="winrate"]');
-  assert((await page.textContent("#wrTotal")) === "4", "historial cuenta 4 rondas (1W 1T 2L)");
+  assert((await page.textContent("#wrTotal")) === "5", "historial cuenta 5 rondas (1W 2T 2L)");
   assert((await page.textContent("#wrGlobal")) === "33.3%", "win rate 1/(1+2) = 33.3%: el TIE no cuenta");
-  assert((await page.textContent("#wrTies")) === "1", "contador de empates = 1");
+  assert((await page.textContent("#wrTies")) === "2", "contador de empates = 2");
   assert((await page.textContent(".rec.win .rec-calc")).includes("+100"), "el WIN muestra CALC +100 junto al real +103");
   assert((await page.$$(".rec.move")).length === 2, "historial muestra 2 movimientos");
   await page.click('[data-filter="rounds"]');
-  assert((await page.$$(".rec.move")).length === 0 && (await page.$$(".rec")).length === 4, "filtro RONDAS");
+  assert((await page.$$(".rec.move")).length === 0 && (await page.$$(".rec")).length === 5, "filtro RONDAS");
   await page.click('[data-filter="all"]');
   // UNDO deshace los movimientos primero (son los más recientes)
   for (let i = 0; i < 2; i++) { await page.click(".rec-undo"); await page.click(".modal-btns .primary"); await page.waitForTimeout(900); }
@@ -104,7 +118,7 @@ const assert = (c, m) => { if (!c) { console.log("✗", m); process.exitCode = 1
   assert(!(await page.isVisible("#lockPanel")), "UNDO quita el bloqueo");
   assert(!(await page.isDisabled("#btnWin")), "WIN habilitado otra vez");
   const st = await page.evaluate(() => window.__winrate.state);
-  assert(st.records.length === 3 && String(st.settings.capital) === (await page.inputValue("#inCapital")) && st.settings.capital === st.records[2].capitalAfter, `capital regresó a ${st.settings.capital} (antes ${capLocked})`);
+  assert(st.records.length === 4 && String(st.settings.capital) === (await page.inputValue("#inCapital")) && st.settings.capital === st.records[3].capitalAfter, `capital regresó a ${st.settings.capital} (antes ${capLocked})`);
 
   // Export (con un retiro incluido)
   await page.click("#btnWithdraw");
