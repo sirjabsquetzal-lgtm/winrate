@@ -45,6 +45,11 @@
           <span id="hearts" class="hearts" aria-live="polite"></span>
           <span id="dayLabel" class="day-label"></span>
         </div>
+        <div id="goalRow" class="goal-row" hidden>
+          <span class="lbl">META HOY</span>
+          <div class="goal-track"><div id="goalFill" class="goal-fill"></div></div>
+          <span id="goalText" class="goal-text">+0% / 10%</span>
+        </div>
 
         <div class="hud panel capital-panel">
           <label class="lbl" for="inCapital">CAPITAL <span class="unit">(COINS)</span></label>
@@ -108,9 +113,9 @@
             <button id="btnWin" class="arcade arcade-win"><span class="face">WIN</span></button>
           </div>
           <div id="lockPanel" class="hud lock-panel" hidden>
-            <div class="lock-icon" data-icon="lock" aria-hidden="true"></div>
-            <div class="lock-title glitch" data-text="SYSTEM LOCKED">SYSTEM LOCKED</div>
-            <div class="lock-sub">Límite diario de 2 pérdidas alcanzado</div>
+            <div id="lockIcon" class="lock-icon" aria-hidden="true"></div>
+            <div id="lockTitle" class="lock-title glitch" data-text="SYSTEM LOCKED">SYSTEM LOCKED</div>
+            <div id="lockReason" class="lock-sub">Límite diario de 2 pérdidas alcanzado</div>
             <div id="lockCountdown" class="lock-count">00:00:00</div>
             <div class="lock-sub">Se libera a las 06:00</div>
           </div>
@@ -237,6 +242,17 @@
         <button class="chip" data-sound-opt="on">ON</button>
         <button class="chip" data-sound-opt="off">OFF</button>
       </div>
+
+      <div class="lbl">CONTROL DE GANANCIA</div>
+      <div class="seg" id="segGoal">
+        <button class="chip" data-goal-opt="on">ON</button>
+        <button class="chip" data-goal-opt="off">OFF</button>
+      </div>
+      <div class="goal-target">
+        <label class="lbl" for="inGoal">META DIARIA (%)</label>
+        <input id="inGoal" class="text-input" type="text" inputmode="decimal" autocomplete="off" />
+      </div>
+      <div id="goalNote" class="drawer-note"></div>
 
       <div class="lbl">DATOS</div>
       <button id="btnExport" class="btn-wide">EXPORTAR .JSON</button>

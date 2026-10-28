@@ -3,9 +3,10 @@
 // v2: agrega `movements` (abonos y retiros) · v3: resultado "tie" y `expected` (cantidad calculada) en cada ronda
 export const SCHEMA_VERSION = 3;
 export const SUPPORTED_SCHEMAS = [1, 2, 3];
-export const APP_VERSION = "1.3.0";
+export const APP_VERSION = "1.4.0";
 export const MAX_LOSSES_PER_DAY = 2;
 export const DAY_START_HOUR = 6;
+export const DEFAULT_PROFIT_TARGET = 10; // % de ganancia diaria para el control de ganancia
 export const RATIO_PRESETS = ["1.5", "2", "3"];
 
 const HOUR = 3600 * 1000;
@@ -22,6 +23,8 @@ export function defaultSettings() {
     ratio: 2,
     ratioPreset: "2",
     customRatio: null,
+    profitLock: false, // control de ganancia: bloquea el día al llegar a la meta
+    profitTarget: DEFAULT_PROFIT_TARGET,
   };
 }
 
@@ -152,15 +155,38 @@ export function lossesOnDay(records, key) {
   return records.reduce((n, r) => n + (r.dayKey === key && r.result === "lose" ? 1 : 0), 0);
 }
 
-export function lockStatus(records, now) {
+/**
+ * Meta de ganancia del día de juego. La base es el capital con el que empezó la primera ronda del día;
+ * el avance es la suma de las rondas (abonos y retiros no cuentan). Se cumple con ≥ 1 WIN y avance ≥ meta.
+ */
+export function dayGoal(records, key, settings = {}) {
+  const target = isNum(settings.profitTarget) && settings.profitTarget > 0 ? settings.profitTarget : DEFAULT_PROFIT_TARGET;
+  const recs = dayRecords(records, key);
+  const base = recs.length ? recs[0].capitalBefore : null;
+  const net = sumDelta(recs);
+  const wins = recs.filter((r) => r.result === "win").length;
+  const pct = base > 0 ? (net / base) * 100 : 0;
+  const active = settings.profitLock === true;
+  return { active, target, base, net, wins, pct, goalCoins: base > 0 ? round2((base * target) / 100) : null, reached: active && wins >= 1 && pct >= target - 1e-9 };
+}
+
+/**
+ * Estado de bloqueo del día. reason: "losses" (2 pérdidas) tiene prioridad sobre "goal" (meta de ganancia cumplida).
+ * `settings` es opcional: sin él solo aplica el límite de pérdidas.
+ */
+export function lockStatus(records, now, settings = {}) {
   const key = dayKey(now);
   const losses = lossesOnDay(records, key);
-  const locked = losses >= MAX_LOSSES_PER_DAY;
+  const goal = dayGoal(records, key, settings);
+  const lossLock = losses >= MAX_LOSSES_PER_DAY;
+  const locked = lossLock || goal.reached;
   return {
     dayKey: key,
     losses,
     lives: Math.max(0, MAX_LOSSES_PER_DAY - losses),
     locked,
+    reason: lossLock ? "losses" : goal.reached ? "goal" : null,
+    goal,
     unlockAt: locked ? nextReset(now) : null,
   };
 }
@@ -196,7 +222,7 @@ export function checkAmount(result, amount, capitalBefore) {
  */
 export function recordResult(state, result, now, amount) {
   if (!RESULTS.includes(result)) return { ok: false, reason: "result" };
-  const lock = lockStatus(state.records, now);
+  const lock = lockStatus(state.records, now, state.settings);
   if (lock.locked) return { ok: false, reason: "locked" };
   const s = state.settings;
   const capitalBefore = toMoney(s.capital);
@@ -227,6 +253,7 @@ export function recordResult(state, result, now, amount) {
   const next = { ...state, settings: { ...s, capital: record.capitalAfter }, records };
   let scenario = result;
   if (result === "lose") scenario = lossesOnDay(records, record.dayKey) >= MAX_LOSSES_PER_DAY ? "lock" : "lose1";
+  else if (dayGoal(records, record.dayKey, s).reached) scenario = "goal"; // esta ronda cumplió la meta del día
   return { ok: true, state: next, record, scenario };
 }
 
@@ -303,6 +330,13 @@ export const PHRASES = {
     "Hoy se protege el capital. Sal a vivir, mañana hay revancha.",
     "Límite alcanzado. Apaga la pantalla, el mercado sigue mañana.",
   ],
+  goal: [
+    "¡Meta del día cumplida! Guarda las Coins y ve a disfrutar.",
+    "Objetivo logrado. Los profesionales cobran y se retiran.",
+    "¡GG! Llegaste a tu meta. Mañana se juega otra vez.",
+    "Ganancia asegurada. Hoy ganó la disciplina.",
+    "¡Misión cumplida! Apaga la pantalla con la sonrisa puesta.",
+  ],
   tie: [
     "Empate. Tus vidas siguen intactas, sigue con el plan.",
     "Ronda neutral. Respira y sigue.",
@@ -376,6 +410,8 @@ export function sanitizeSettings(s) {
   if (isNum(s.ratio) && s.ratio > 0) out.ratio = s.ratio;
   if (s.ratioPreset === "custom" || RATIO_PRESETS.includes(s.ratioPreset)) out.ratioPreset = s.ratioPreset;
   if (s.customRatio === null || (isNum(s.customRatio) && s.customRatio > 0)) out.customRatio = s.customRatio;
+  if (typeof s.profitLock === "boolean") out.profitLock = s.profitLock;
+  if (isNum(s.profitTarget) && s.profitTarget > 0 && s.profitTarget <= 1000) out.profitTarget = s.profitTarget;
   return out;
 }
 

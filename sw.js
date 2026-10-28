@@ -1,6 +1,6 @@
 // WinRate service worker — cache-first con versionado.
 // Al publicar cambios, sube CACHE_VERSION para que los usuarios reciban el aviso de actualización.
-const CACHE_VERSION = "winrate-v1.3.0";
+const CACHE_VERSION = "winrate-v1.4.0";
 
 const ASSETS = [
   "./",

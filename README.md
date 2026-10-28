@@ -59,6 +59,15 @@ node tests/e2e.cjs && node tests/pwa-offline.cjs && node tests/screenshots.cjs
 
 - **Decimales:** todas las cantidades de Coins (capital, ganancias, pérdidas, comisiones, abonos y retiros) aceptan **hasta 2 decimales**, con punto o coma (`4.98` o `4,98`). La inversión sugerida sigue siendo entera: `floor(capital / bullets)`.
 
+## Control de ganancia (meta diaria)
+
+En **⚙ → CONTROL DE GANANCIA** se activa un tope de ganancia diaria (por defecto **10 %**, configurable en **META DIARIA (%)**).
+
+- La base es el capital con el que empezó **la primera ronda del día de juego**; el avance es la suma de las rondas de hoy (abonos y retiros no cuentan).
+- Con el control activo aparece en Calculator la barra **META HOY** (`+6.0% / 10%`).
+- Cuando hay **al menos 1 WIN** y el avance llega a la meta, sale el pop-up **TARGET REACHED** y se bloquean WIN / TIE / LOSE hasta las **06:00** (con cuenta regresiva). Abonar y retirar sí se permite.
+- Con la meta cumplida no se puede apagar el control ni cambiar el % hasta el día siguiente. **UNDO** del registro que cumplió la meta quita el bloqueo.
+
 ## Abonos y retiros
 
 En **Calculator**, debajo del capital, hay dos botones:

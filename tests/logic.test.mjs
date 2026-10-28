@@ -104,7 +104,7 @@ test("undo desbloquea y restaura capital", () => {
 
 console.log("Frases");
 test("nunca repite la misma frase dos veces seguidas", () => {
-  for (const sc of ["win", "tie", "lose1", "lock"]) {
+  for (const sc of ["win", "tie", "goal", "lose1", "lock"]) {
     assert.equal(L.PHRASES[sc].length, 5);
     let last;
     for (let i = 0; i < 500; i++) {
@@ -207,6 +207,64 @@ test("import valida empates y signos", () => {
   bad.records[1].delta = -5; // WIN con delta negativo
   bad.records[1].capitalAfter = bad.records[1].capitalBefore - 5;
   assert.equal(L.validateImport(bad).ok, false);
+});
+
+console.log("Control de ganancia (meta diaria)");
+const goalSettings = (over = {}) => withSettings({ capital: 1000, bullets: 20, ratio: 2, profitLock: true, profitTarget: 10, ...over });
+test("desactivado: nunca bloquea por ganancia", () => {
+  let s = goalSettings({ profitLock: false });
+  s = L.recordResult(s, "win", at(2026, 10, 28, 10), 150).state;
+  assert.equal(L.lockStatus(s.records, at(2026, 10, 28, 11), s.settings).locked, false);
+});
+test("activado: WIN que llega a +10% bloquea el día con escenario goal", () => {
+  let s = goalSettings();
+  let r = L.recordResult(s, "win", at(2026, 10, 28, 10), 60); // +6%
+  assert.equal(r.scenario, "win"); s = r.state;
+  r = L.recordResult(s, "win", at(2026, 10, 28, 11), 40);     // +10% exacto
+  assert.equal(r.scenario, "goal"); s = r.state;
+  const lock = L.lockStatus(s.records, at(2026, 10, 28, 12), s.settings);
+  assert.deepEqual([lock.locked, lock.reason, lock.goal.net, lock.goal.base, lock.goal.goalCoins], [true, "goal", 100, 1000, 100]);
+  assert.equal(lock.unlockAt, at(2026, 10, 29, 6, 0));
+  for (const res of ["win", "lose", "tie"]) assert.equal(L.recordResult(s, res, at(2026, 10, 28, 13)).reason, "locked");
+  assert.equal(L.lockStatus(s.records, at(2026, 10, 29, 6, 0), s.settings).locked, false); // se libera a las 06:00
+});
+test("abajo de la meta no bloquea; base = capital al inicio del día", () => {
+  let s = goalSettings();
+  s = L.recordResult(s, "lose", at(2026, 10, 28, 10), 50).state;  // 950
+  s = L.recordResult(s, "win", at(2026, 10, 28, 11), 140).state;  // 1090 → neto +90 sobre base 1000 = 9%
+  const g = L.lockStatus(s.records, at(2026, 10, 28, 12), s.settings);
+  assert.deepEqual([g.locked, g.goal.base, g.goal.net], [false, 1000, 90]);
+  assert.ok(Math.abs(g.goal.pct - 9) < 1e-9);
+});
+test("abonos y retiros no cuentan para la meta", () => {
+  let s = goalSettings();
+  s = L.recordResult(s, "win", at(2026, 10, 28, 10), 20).state;
+  s = L.recordMovement(s, "deposit", 5000, at(2026, 10, 28, 11)).state;
+  assert.equal(L.lockStatus(s.records, at(2026, 10, 28, 12), s.settings).locked, false);
+});
+test("se requiere al menos 1 WIN (un TIE con ganancia no basta)", () => {
+  let s = goalSettings();
+  s = L.recordResult(s, "tie", at(2026, 10, 28, 10), 200).state;
+  assert.equal(L.lockStatus(s.records, at(2026, 10, 28, 11), s.settings).locked, false);
+});
+test("meta configurable y UNDO desbloquea", () => {
+  let s = goalSettings({ profitTarget: 5 });
+  const r = L.recordResult(s, "win", at(2026, 10, 28, 10), 50);
+  assert.equal(r.scenario, "goal"); s = r.state;
+  const u = L.undoLast(s).state;
+  assert.equal(L.lockStatus(u.records, at(2026, 10, 28, 11), u.settings).locked, false);
+});
+test("2 pérdidas tienen prioridad como motivo de bloqueo", () => {
+  let s = goalSettings({ profitTarget: 1 });
+  s = L.recordResult(s, "lose", at(2026, 10, 28, 10)).state;
+  s = L.recordResult(s, "lose", at(2026, 10, 28, 11)).state;
+  assert.equal(L.lockStatus(s.records, at(2026, 10, 28, 12), s.settings).reason, "losses");
+});
+test("settings de meta se validan al importar", () => {
+  const st = L.sanitizeSettings({ profitLock: true, profitTarget: 15 });
+  assert.deepEqual([st.profitLock, st.profitTarget], [true, 15]);
+  const bad = L.sanitizeSettings({ profitLock: "si", profitTarget: -3 });
+  assert.deepEqual([bad.profitLock, bad.profitTarget], [false, 10]);
 });
 
 console.log("Decimales (2)");

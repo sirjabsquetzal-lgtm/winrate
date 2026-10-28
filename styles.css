@@ -805,3 +805,29 @@ button { cursor: pointer; touch-action: manipulation; }
 .rec-calc b { color: var(--silver); }
 .amount-hint { margin-top: 6px; font-size: 18px; color: var(--text-dim); }
 .sign-seg { margin-top: 12px; }
+
+/* ---------- Control de ganancia ---------- */
+.goal-row { display: flex; align-items: center; gap: 10px; margin: -4px 0 12px; }
+.goal-row .lbl { margin: 0; flex: none; }
+.goal-track {
+  position: relative; flex: 1; height: 14px; padding: 2px;
+  background: var(--silver-grad);
+  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
+}
+.goal-track::before { content: ""; position: absolute; inset: 2px; background: var(--bg); }
+.goal-fill {
+  position: relative; height: 100%; width: 0;
+  background: repeating-linear-gradient(90deg, var(--red) 0 6px, var(--red-deep) 6px 8px);
+  box-shadow: 0 0 8px var(--glow);
+  transition: width .6s cubic-bezier(.2, .9, .3, 1.2);
+}
+.goal-row.done .goal-fill { background: repeating-linear-gradient(90deg, var(--red-hi) 0 6px, var(--red) 6px 8px); animation: blink 1s infinite steps(1); }
+.goal-text { flex: none; font-size: 20px; color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.goal-row.done .goal-text { color: var(--red); text-shadow: 0 0 6px var(--glow-soft); }
+.goal-target { display: flex; flex-direction: column; gap: 6px; }
+.goal-target .lbl { margin: 4px 0 0; }
+.goal-target .text-input:disabled { opacity: .5; }
+.drawer-note { font-size: 17px; line-height: 1.25; color: var(--text-dim); }
+.drawer-note.warn-note { color: var(--red); }
+.seg .chip:disabled { opacity: .4; cursor: not-allowed; }
+.lock-panel.goal .lock-icon svg { color: var(--red); }

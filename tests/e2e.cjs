@@ -180,6 +180,36 @@ const assert = (c, m) => { if (!c) { console.log("✗", m); process.exitCode = 1
   await page.fill("#inCapital", "54,98");
   assert((await page.evaluate(() => window.__winrate.state.settings.capital)) === 54.98, "capital editable a mano con decimales (54,98)");
 
+  // Control de ganancia: neto de hoy +49.96 sobre base 1000 (4.996%); meta 5%
+  assert(await page.isHidden("#goalRow"), "barra de meta oculta con el control apagado");
+  await page.click("#btnSettings");
+  await page.click('[data-goal-opt="on"]');
+  await page.fill("#inGoal", "5");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  assert(await page.isVisible("#goalRow"), "barra de meta visible al activar");
+  assert((await page.textContent("#goalText")).trim() === "+5.0% / 5%", "progreso +5.0% / 5% (4.996 redondeado)");
+  assert(await page.isHidden("#lockPanel"), "4.996% < 5%: aún no bloquea");
+  await page.click("#btnWin");
+  await page.fill("#mf_amount", "1");
+  await page.click(".modal-btns .primary");
+  await page.waitForSelector(".modal.win .modal-tag");
+  assert((await page.textContent(".modal-tag")).includes("TARGET REACHED"), "pop-up de felicitación TARGET REACHED");
+  await closeModal();
+  assert(await page.isVisible("#lockPanel") && (await page.textContent("#lockTitle")) === "TARGET REACHED", "panel TARGET REACHED visible");
+  assert(await page.isDisabled("#btnWin") && await page.isDisabled("#btnLose") && await page.isDisabled("#btnTie"), "no deja registrar más rondas");
+  assert(!(await page.isDisabled("#btnWithdraw")), "sí deja retirar las ganancias");
+  await page.click("#btnSettings");
+  assert(await page.isDisabled('[data-goal-opt="off"]') && await page.isDisabled("#inGoal"), "con la meta cumplida no se puede apagar ni cambiar");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  await page.click('[data-tab="winrate"]');
+  await page.click(".rec-undo");
+  await page.click(".modal-btns .primary");
+  await page.waitForTimeout(900);
+  await page.click('[data-tab="calc"]');
+  assert(await page.isHidden("#lockPanel") && !(await page.isDisabled("#btnWin")), "UNDO del WIN quita el bloqueo de meta");
+
   // Texto prohibido
   const html = await page.evaluate(() => document.body.innerText);
   assert(!/apuest|apost|\bbet/i.test(html), "sin palabras prohibidas en la interfaz");
