@@ -57,6 +57,8 @@ node tests/e2e.cjs && node tests/pwa-offline.cjs && node tests/screenshots.cjs
 - **WIN** y **LOSE** abren primero un pop-up con la cantidad **calculada** ya escrita (ganancia o inversión). Si el juego pagó o quitó otra cantidad, escríbela y presiona **CONFIRMAR**; luego sale el pop-up normal de victoria o derrota. **CANCELAR** no registra nada. En el historial, si la cantidad real fue distinta, se ve también la calculada (`CALC +100`).
 - **TIE** (empate) también abre el pop-up: elige **- PERDI** (comisión, viene seleccionado) o **+ GANE** y escribe la cantidad (0 si no hubo). El capital se ajusta, pero el empate **no gasta vida**. El win rate es **W / (W + L)**: los empates se cuentan aparte (T) y no bajan ni suben el porcentaje, ni rompen rachas.
 
+- **Decimales:** todas las cantidades de Coins (capital, ganancias, pérdidas, comisiones, abonos y retiros) aceptan **hasta 2 decimales**, con punto o coma (`4.98` o `4,98`). La inversión sugerida sigue siendo entera: `floor(capital / bullets)`.
+
 ## Abonos y retiros
 
 En **Calculator**, debajo del capital, hay dos botones:

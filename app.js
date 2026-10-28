@@ -1,7 +1,7 @@
 // WinRate — punto de entrada de la UI.
 import {
   APP_VERSION, SCHEMA_VERSION, RATIO_PRESETS, PHRASES, MAX_LOSSES_PER_DAY,
-  defaultState, toInt, calcProjection, parseRatio, formatRatio, dayKey, lockStatus, addDays,
+  defaultState, toMoney, parseMoney, round2, calcProjection, parseRatio, formatRatio, dayKey, lockStatus, addDays,
   recordResult, recordMovement, undoLast, lastEntry, flowStats, pickPhraseIndex, exportState, validateImport, localDateKey,
   winRate, dayRecords, groupBy, sumDelta, averages, streaks, drawdown, bestWorstDay, heatmap, weekday,
 } from "./js/logic.js";
@@ -12,7 +12,7 @@ import { animateNumber, shake, flash, burst } from "./js/fx.js";
 import { renderCharts, MONTHS } from "./js/charts.js";
 
 const $ = (id) => document.getElementById(id);
-const fmt = (n) => Number(n).toLocaleString("es-MX");
+const fmt = (n) => Number(n).toLocaleString("es-MX", { maximumFractionDigits: 2 });
 const signed = (n) => (n > 0 ? "+" : n < 0 ? "−" : "±") + fmt(Math.abs(n));
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 // Sin acentos: Press Start 2P dibuja mal las mayúsculas acentuadas
@@ -27,6 +27,15 @@ function timeLabel(ts) {
   const p = (n) => String(n).padStart(2, "0");
   return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+
+/** Deja solo dígitos y un separador decimal (punto o coma → punto), con máx. 2 decimales. */
+function cleanMoneyInput(v) {
+  let out = String(v).replace(",", ".").replace(/[^\d.]/g, "");
+  const i = out.indexOf(".");
+  if (i !== -1) out = out.slice(0, i + 1) + out.slice(i + 1).replace(/\./g, "").slice(0, 2);
+  return out.slice(0, 15);
+}
+const MONEY_ERR = "Escribe una cantidad válida (hasta 2 decimales, ej. 4.98).";
 
 // ---------------- Estado ----------------
 let state = loadState();
@@ -77,7 +86,7 @@ function renderCalc({ syncInputs = true } = {}) {
     if (document.activeElement !== $("inCustom") && s.customRatio) $("inCustom").value = s.customRatio;
   }
 
-  const capital = toInt(s.capital);
+  const capital = toMoney(s.capital);
   const p = calcProjection(Number.isFinite(capital) ? capital : 0, s.bullets, s.ratio);
   const insufficient = p.invested <= 0;
 
@@ -140,9 +149,10 @@ function updateCountdown() {
 
 function onCapitalInput() {
   const el = $("inCapital");
-  const clean = el.value.replace(/\D/g, "").slice(0, 12);
+  const clean = cleanMoneyInput(el.value);
   if (clean !== el.value) el.value = clean;
-  commit({ ...state, settings: { ...state.settings, capital: clean === "" ? null : parseInt(clean, 10) } });
+  const n = parseMoney(clean.replace(/\.$/, ""));
+  commit({ ...state, settings: { ...state.settings, capital: clean === "" || Number.isNaN(n) ? null : n } });
   renderCalc({ syncInputs: false });
 }
 
@@ -199,7 +209,7 @@ function applyCustom() {
  * WIN/LOSE devuelven la magnitud; TIE devuelve el cambio con signo (comisión = negativo). null si se cancela.
  */
 async function askAmount(result) {
-  const capital = toInt(state.settings.capital);
+  const capital = toMoney(state.settings.capital);
   if (result === "tie") {
     const res = await openModal({
       variant: "tie",
@@ -208,18 +218,18 @@ async function askAmount(result) {
       sub: `Capital: ${fmt(capital)}`,
       fields: [
         { id: "sign", type: "sign", options: [["-", "- PERDI"], ["+", "+ GANE"]], value: "-" },
-        { id: "amount", label: "CANTIDAD (COINS)", inputmode: "numeric", big: true, value: "0", select: true },
+        { id: "amount", label: "CANTIDAD (COINS)", inputmode: "decimal", big: true, value: "0", select: true },
       ],
       validate: (v) => {
-        if (!/^\d+$/.test(v.amount)) return "Escribe una cantidad entera (0 si no hubo comisión).";
-        if (v.sign === "-" && parseInt(v.amount, 10) > capital) return `No puedes perder más de tu capital (${fmt(capital)}).`;
+        if (Number.isNaN(parseMoney(v.amount))) return MONEY_ERR + " Pon 0 si no hubo comisión.";
+        if (v.sign === "-" && parseMoney(v.amount) > capital) return `No puedes perder más de tu capital (${fmt(capital)}).`;
         return null;
       },
       buttons: [{ label: "CANCELAR", value: false }, { label: "CONFIRMAR", value: true, primary: true }],
     });
     if (!res?.value) return null;
-    const n = parseInt(res.fields.amount, 10);
-    return res.fields.sign === "-" ? -n : n;
+    const n = parseMoney(res.fields.amount);
+    return res.fields.sign === "-" ? round2(-n) : n;
   }
   const p = calcProjection(capital, state.settings.bullets, state.settings.ratio);
   const isWin = result === "win";
@@ -229,15 +239,17 @@ async function askAmount(result) {
     tag: isWin ? "¿CUANTO GANASTE?" : "¿CUANTO PERDISTE?",
     text: isWin ? "Coins ganadas en la ronda." : "Coins perdidas en la ronda.",
     sub: `Calculado: ${isWin ? "+" : "−"}${fmt(calc)} · Capital: ${fmt(capital)}`,
-    fields: [{ id: "amount", label: isWin ? "GANANCIA REAL (COINS)" : "PERDIDA REAL (COINS)", inputmode: "numeric", big: true, value: String(calc), select: true }],
+    fields: [{ id: "amount", label: isWin ? "GANANCIA REAL (COINS)" : "PERDIDA REAL (COINS)", inputmode: "decimal", big: true, value: String(calc), select: true }],
     validate: (v) => {
-      if (!/^\d+$/.test(v.amount) || parseInt(v.amount, 10) <= 0) return "Escribe una cantidad entera mayor a 0.";
-      if (!isWin && parseInt(v.amount, 10) > capital) return `No puedes perder más de tu capital (${fmt(capital)}).`;
+      const n = parseMoney(v.amount);
+      if (Number.isNaN(n)) return MONEY_ERR;
+      if (n <= 0) return "La cantidad debe ser mayor a 0.";
+      if (!isWin && n > capital) return `No puedes perder más de tu capital (${fmt(capital)}).`;
       return null;
     },
     buttons: [{ label: "CANCELAR", value: false }, { label: "CONFIRMAR", value: true, primary: true }],
   });
-  return res?.value ? parseInt(res.fields.amount, 10) : null;
+  return res?.value ? parseMoney(res.fields.amount) : null;
 }
 
 async function onResult(result) {
@@ -246,7 +258,7 @@ async function onResult(result) {
   sfx.click();
   const amount = await askAmount(result);
   if (amount === null) return;
-  const before = toInt(state.settings.capital);
+  const before = toMoney(state.settings.capital);
   const res = recordResult(state, result, Date.now(), amount);
   if (!res.ok) {
     if (res.reason === "locked") renderCalc();
@@ -297,25 +309,27 @@ async function onResult(result) {
 async function onMovement(type) {
   sfx.click();
   const isDep = type === "deposit";
-  const capital = Number.isFinite(toInt(state.settings.capital)) ? toInt(state.settings.capital) : 0;
+  const capital = Number.isFinite(toMoney(state.settings.capital)) ? toMoney(state.settings.capital) : 0;
   const res = await openModal({
     variant: isDep ? "lose" : "win",
     tag: isDep ? "ABONAR COINS" : "RETIRAR COINS",
     text: isDep ? "¿Cuántas Coins compraste para abonar a tu capital?" : "¿Cuántas Coins retiras para comprar en la tienda?",
     sub: `Capital actual: ${fmt(capital)} Coins · no afecta tu win rate`,
     fields: [
-      { id: "amount", label: "CANTIDAD (COINS)", placeholder: isDep ? "500" : String(Math.max(1, Math.floor(capital / 2))), inputmode: "numeric", big: true },
+      { id: "amount", label: "CANTIDAD (COINS)", placeholder: isDep ? "500" : String(Math.max(1, Math.floor(capital / 2))), inputmode: "decimal", big: true },
       { id: "note", label: "NOTA (OPCIONAL)", placeholder: isDep ? "recarga" : "skin, pase...", maxlength: 40 },
     ],
     validate: (v) => {
-      if (!/^\d+$/.test(v.amount) || parseInt(v.amount, 10) <= 0) return "Escribe una cantidad entera mayor a 0.";
-      if (!isDep && parseInt(v.amount, 10) > capital) return `No puedes retirar más de tu capital (${fmt(capital)}).`;
+      const n = parseMoney(v.amount);
+      if (Number.isNaN(n)) return MONEY_ERR;
+      if (n <= 0) return "La cantidad debe ser mayor a 0.";
+      if (!isDep && n > capital) return `No puedes retirar más de tu capital (${fmt(capital)}).`;
       return null;
     },
     buttons: [{ label: "CANCELAR", value: false }, { label: isDep ? "ABONAR" : "RETIRAR", value: true, primary: true }],
   });
   if (!res?.value) return;
-  const r = recordMovement(state, type, parseInt(res.fields.amount, 10), Date.now(), res.fields.note);
+  const r = recordMovement(state, type, parseMoney(res.fields.amount), Date.now(), res.fields.note);
   if (!r.ok) return;
   commit(r.state);
   newRecordId = r.movement.id;
@@ -416,7 +430,7 @@ async function onUndo() {
   if (!ok) return;
   const res = undoLast(state);
   if (!res.ok) return;
-  const from = toInt(state.settings.capital);
+  const from = toMoney(state.settings.capital);
   commit(res.state);
   animateNumber(from, res.removed.capitalBefore, (v) => ($("inCapital").value = v));
   renderAll({ syncInputs: false });
@@ -738,16 +752,16 @@ async function boot() {
     typewriter: true,
     fields: [
       { id: "name", label: "NOMBRE DEL JUGADOR", placeholder: "JABS", maxlength: 16, value: s.playerName },
-      { id: "capital", label: "CAPITAL INICIAL (COINS)", placeholder: "1000", inputmode: "numeric", big: true, value: s.capital ?? "" },
+      { id: "capital", label: "CAPITAL INICIAL (COINS)", placeholder: "1000", inputmode: "decimal", big: true, value: s.capital ?? "" },
     ],
     validate: (v) => {
       if (!v.name) return "Escribe tu nombre.";
-      if (!/^\d+$/.test(v.capital)) return "El capital debe ser un número entero.";
+      if (Number.isNaN(parseMoney(v.capital))) return "El capital debe ser un número (hasta 2 decimales).";
       return null;
     },
     buttons: [{ label: "PRESS START", value: true, primary: true }],
   });
-  commit({ ...state, settings: { ...state.settings, playerName: res.fields.name.slice(0, 16), capital: parseInt(res.fields.capital, 10) } });
+  commit({ ...state, settings: { ...state.settings, playerName: res.fields.name.slice(0, 16), capital: parseMoney(res.fields.capital) } });
   renderAll();
 }
 

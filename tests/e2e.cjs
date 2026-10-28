@@ -158,6 +158,28 @@ const assert = (c, m) => { if (!c) { console.log("✗", m); process.exitCode = 1
   await page.waitForSelector(".modal-tag");
   assert((await page.textContent(".modal-tag")).includes("INVALIDO"), "import rechaza schemaVersion 99");
   await page.click(".modal-btns .primary");
+  // Decimales: el juego paga cantidades como 4.98
+  const capDec = Number(await page.inputValue("#inCapital"));
+  await page.keyboard.press("Escape"); // cierra Settings
+  await page.waitForTimeout(300);
+  await page.click("#btnWin");
+  await page.fill("#mf_amount", "4.985");
+  await page.click(".modal-btns .primary");
+  assert(await page.isVisible("#modalErr"), "rechaza 3 decimales (4.985)");
+  await page.fill("#mf_amount", "4,98");
+  await page.click(".modal-btns .primary");
+  await page.waitForSelector(".modal.win .modal-tag");
+  assert((await page.textContent(".modal-big")).includes("+4.98"), "pop-up de victoria muestra +4.98 (coma aceptada)");
+  await closeModal();
+  assert(Math.abs(Number(await page.inputValue("#inCapital")) - (capDec + 4.98)) < 1e-9, `capital ${capDec} + 4.98 = ${await page.inputValue("#inCapital")}`);
+  await page.click("#btnTie");
+  await page.fill("#mf_amount", "0.02");
+  await page.click(".modal-btns .primary");
+  await closeModal();
+  assert(Math.abs(Number(await page.inputValue("#inCapital")) - (capDec + 4.96)) < 1e-9, "TIE con comisión 0.02 descuenta decimales");
+  await page.fill("#inCapital", "54,98");
+  assert((await page.evaluate(() => window.__winrate.state.settings.capital)) === 54.98, "capital editable a mano con decimales (54,98)");
+
   // Texto prohibido
   const html = await page.evaluate(() => document.body.innerText);
   assert(!/apuest|apost|\bbet/i.test(html), "sin palabras prohibidas en la interfaz");

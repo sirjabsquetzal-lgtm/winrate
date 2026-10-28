@@ -3,7 +3,7 @@
 // v2: agrega `movements` (abonos y retiros) · v3: resultado "tie" y `expected` (cantidad calculada) en cada ronda
 export const SCHEMA_VERSION = 3;
 export const SUPPORTED_SCHEMAS = [1, 2, 3];
-export const APP_VERSION = "1.2.1";
+export const APP_VERSION = "1.3.0";
 export const MAX_LOSSES_PER_DAY = 2;
 export const DAY_START_HOUR = 6;
 export const RATIO_PRESETS = ["1.5", "2", "3"];
@@ -35,23 +35,46 @@ export function toInt(v) {
   return Number.isFinite(n) ? Math.trunc(n) : NaN;
 }
 
+// ---------- Coins con hasta 2 decimales ----------
+// El juego paga cantidades como 4.98, así que las Coins se guardan como números redondeados a 2 decimales.
+export function round2(n) {
+  const r = Math.round(n * 100) / 100;
+  return r === 0 ? 0 : r; // evita -0
+}
+
+export function isMoney(v) {
+  return typeof v === "number" && Number.isFinite(v) && Math.abs(v * 100 - Math.round(v * 100)) < 1e-6;
+}
+
+/** Lee lo que escribe el usuario: "4.98", "4,98", "120". NaN si no es válido o tiene más de 2 decimales. */
+export function parseMoney(input) {
+  const str = String(input ?? "").trim().replace(",", ".");
+  if (!/^\d+(\.\d{1,2})?$/.test(str)) return NaN;
+  return round2(Number(str));
+}
+
+export function toMoney(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? round2(v) : NaN;
+  return parseMoney(v);
+}
+
 export function calcInvestment(capital, bullets) {
-  const c = toInt(capital);
+  const c = toMoney(capital);
   const b = toInt(bullets);
   if (!Number.isFinite(c) || !Number.isFinite(b) || b <= 0 || c <= 0) return 0;
   return Math.floor(c / b);
 }
 
 export function calcProjection(capital, bullets, ratio) {
-  const c = Math.max(0, toInt(capital) || 0);
+  const c = Math.max(0, toMoney(capital) || 0);
   const invested = calcInvestment(c, bullets);
   const gain = Math.floor(invested * ratio);
   return {
     invested,
     gain,
-    winCapital: c + gain,
+    winCapital: round2(c + gain),
     loss: invested,
-    loseCapital: c - invested,
+    loseCapital: round2(c - invested),
   };
 }
 
@@ -153,20 +176,20 @@ export const RESULTS = ["win", "lose", "tie"];
 
 /**
  * Valida la cantidad real que escribe el usuario. Devuelve null si es válida o el motivo.
- * WIN/LOSE: magnitud entera > 0. TIE: delta con signo (comisión negativa o pequeña ganancia), puede ser 0.
+ * WIN/LOSE: magnitud > 0 con hasta 2 decimales. TIE: delta con signo (comisión negativa o pequeña ganancia), puede ser 0.
  */
 export function checkAmount(result, amount, capitalBefore) {
   if (result === "tie") {
-    if (!Number.isInteger(amount)) return "amount";
+    if (!isMoney(amount)) return "amount";
     return -amount > capitalBefore ? "exceeds" : null;
   }
-  if (!Number.isInteger(amount) || amount <= 0) return "amount";
+  if (!isMoney(amount) || amount <= 0) return "amount";
   if (result === "lose" && amount > capitalBefore) return "exceeds";
   return null;
 }
 
 /**
- * Registra un resultado. `amount` es la cantidad real: en WIN/LOSE la magnitud ganada o perdida (entero > 0);
+ * Registra un resultado. `amount` es la cantidad real: en WIN/LOSE la magnitud ganada o perdida (> 0, hasta 2 decimales);
  * en TIE el cambio con signo (p. ej. −3 por comisión). Si se omite se usa la calculada (TIE = 0).
  * Devuelve { ok, state, record, scenario } o { ok:false, reason }.
  * scenario: "win" | "tie" | "lose1" | "lock"
@@ -176,7 +199,7 @@ export function recordResult(state, result, now, amount) {
   const lock = lockStatus(state.records, now);
   if (lock.locked) return { ok: false, reason: "locked" };
   const s = state.settings;
-  const capitalBefore = toInt(s.capital);
+  const capitalBefore = toMoney(s.capital);
   const bullets = toInt(s.bullets);
   if (!Number.isFinite(capitalBefore) || !Number.isFinite(bullets) || bullets <= 0)
     return { ok: false, reason: "invalid" };
@@ -186,7 +209,7 @@ export function recordResult(state, result, now, amount) {
   const real = amount === undefined || amount === null ? (result === "tie" ? 0 : Math.abs(expected)) : amount;
   const bad = checkAmount(result, real, capitalBefore);
   if (bad) return { ok: false, reason: bad };
-  const delta = result === "win" ? real : result === "lose" ? -real : real;
+  const delta = round2(result === "lose" ? -real : real);
   const record = {
     id: newId(now),
     ts: now,
@@ -198,7 +221,7 @@ export function recordResult(state, result, now, amount) {
     result,
     expected,
     delta,
-    capitalAfter: capitalBefore + delta,
+    capitalAfter: round2(capitalBefore + delta),
   };
   const records = [...state.records, record];
   const next = { ...state, settings: { ...s, capital: record.capitalAfter }, records };
@@ -215,9 +238,9 @@ export const MAX_NOTE = 40;
 /** Registra un abono ("deposit") o retiro ("withdraw"). Devuelve { ok, state, movement } o { ok:false, reason }. */
 export function recordMovement(state, type, amount, now, note = "") {
   if (!MOVEMENT_TYPES.includes(type)) return { ok: false, reason: "type" };
-  const amt = toInt(amount);
-  if (!Number.isFinite(amt) || amt <= 0 || String(amount).trim() !== String(amt)) return { ok: false, reason: "amount" };
-  const capitalBefore = Number.isFinite(toInt(state.settings.capital)) ? toInt(state.settings.capital) : 0;
+  const amt = typeof amount === "number" ? amount : parseMoney(amount);
+  if (!isMoney(amt) || amt <= 0) return { ok: false, reason: "amount" };
+  const capitalBefore = Number.isFinite(toMoney(state.settings.capital)) ? toMoney(state.settings.capital) : 0;
   if (type === "withdraw" && amt > capitalBefore) return { ok: false, reason: "exceeds" };
   const delta = type === "deposit" ? amt : -amt;
   const movement = {
@@ -227,7 +250,7 @@ export function recordMovement(state, type, amount, now, note = "") {
     type,
     amount: amt,
     capitalBefore,
-    capitalAfter: capitalBefore + delta,
+    capitalAfter: round2(capitalBefore + delta),
     note: String(note || "").trim().slice(0, MAX_NOTE),
   };
   return {
@@ -316,13 +339,13 @@ export function validateRecord(r) {
     r && typeof r === "object" &&
     typeof r.id === "string" && r.id.length > 0 &&
     isNum(r.ts) && typeof r.dayKey === "string" && KEY_RE.test(r.dayKey) &&
-    isInt(r.capitalBefore) && isInt(r.bullets) && r.bullets > 0 &&
-    isNum(r.ratio) && r.ratio > 0 && isInt(r.invested) && r.invested >= 0 &&
+    isMoney(r.capitalBefore) && isInt(r.bullets) && r.bullets > 0 &&
+    isNum(r.ratio) && r.ratio > 0 && isMoney(r.invested) && r.invested >= 0 &&
     RESULTS.includes(r.result) &&
-    isInt(r.delta) && isInt(r.capitalAfter) && r.capitalAfter === r.capitalBefore + r.delta &&
+    isMoney(r.delta) && isMoney(r.capitalAfter) && r.capitalAfter === round2(r.capitalBefore + r.delta) &&
     (r.result !== "win" || r.delta >= 0) &&
     (r.result !== "lose" || r.delta <= 0) &&
-    (r.expected === undefined || isInt(r.expected))
+    (r.expected === undefined || isMoney(r.expected))
   );
 }
 
@@ -334,9 +357,9 @@ export function validateMovement(m) {
     m && typeof m === "object" &&
     typeof m.id === "string" && m.id.length > 0 &&
     isNum(m.ts) && typeof m.dayKey === "string" && KEY_RE.test(m.dayKey) &&
-    MOVEMENT_TYPES.includes(m.type) && isInt(m.amount) && m.amount > 0 &&
-    isInt(m.capitalBefore) && isInt(m.capitalAfter) &&
-    m.capitalAfter === m.capitalBefore + (m.type === "deposit" ? m.amount : -m.amount) &&
+    MOVEMENT_TYPES.includes(m.type) && isMoney(m.amount) && m.amount > 0 &&
+    isMoney(m.capitalBefore) && isMoney(m.capitalAfter) &&
+    m.capitalAfter === round2(m.capitalBefore + (m.type === "deposit" ? m.amount : -m.amount)) &&
     (m.note === undefined || typeof m.note === "string")
   );
 }
@@ -348,7 +371,7 @@ export function sanitizeSettings(s) {
   if (typeof s.playerName === "string") out.playerName = s.playerName.slice(0, 16);
   if (s.theme === "dark" || s.theme === "light") out.theme = s.theme;
   if (typeof s.sound === "boolean") out.sound = s.sound;
-  if (s.capital === null || isInt(s.capital)) out.capital = s.capital;
+  if (s.capital === null || isMoney(s.capital)) out.capital = s.capital;
   if (isInt(s.bullets) && s.bullets > 0) out.bullets = s.bullets;
   if (isNum(s.ratio) && s.ratio > 0) out.ratio = s.ratio;
   if (s.ratioPreset === "custom" || RATIO_PRESETS.includes(s.ratioPreset)) out.ratioPreset = s.ratioPreset;
@@ -407,7 +430,7 @@ export function groupBy(records, keyFn) {
 }
 
 export function sumDelta(list) {
-  return list.reduce((s, r) => s + r.delta, 0);
+  return round2(list.reduce((s, r) => s + r.delta, 0));
 }
 
 export function averages(records) {
@@ -421,7 +444,7 @@ export function averages(records) {
   for (const [name, fn] of Object.entries(periods)) {
     const g = groupBy(records, fn);
     const n = g.size;
-    out[name] = { periods: n, avg: n ? Math.round(sumDelta(records) / n) : null };
+    out[name] = { periods: n, avg: n ? round2(sumDelta(records) / n) : null };
   }
   return out;
 }
@@ -457,11 +480,11 @@ export function drawdown(records, movements = []) {
   const s = capitalSeries(records, movements);
   let peak = -Infinity, maxDD = 0, maxPct = 0, flows = 0;
   for (const p of s) {
-    flows += p.flow;
+    flows = round2(flows + p.flow);
     if (p.result === undefined && !p.start) continue; // los movimientos no mueven la curva de rendimiento
-    const v = p.value - flows;
+    const v = round2(p.value - flows);
     if (v > peak) peak = v;
-    const dd = peak - v;
+    const dd = round2(peak - v);
     if (dd > maxDD) maxDD = dd;
     if (peak > 0 && dd / peak > maxPct) maxPct = dd / peak;
   }
@@ -470,7 +493,7 @@ export function drawdown(records, movements = []) {
 
 /** Métricas de abonos y retiros. */
 export function flowStats(movements, todayKey) {
-  const sum = (list, type) => list.filter((m) => m.type === type).reduce((s, m) => s + m.amount, 0);
+  const sum = (list, type) => list.filter((m) => m.type === type).reduce((s, m) => round2(s + m.amount), 0);
   const count = (list, type) => list.filter((m) => m.type === type).length;
   const month = movements.filter((m) => m.dayKey.startsWith(todayKey.slice(0, 7)));
   const y = todayKey.slice(0, 4);
@@ -486,7 +509,7 @@ export function flowStats(movements, todayKey) {
     deposit, withdraw,
     depositCount: count(movements, "deposit"),
     withdrawCount: count(movements, "withdraw"),
-    net: withdraw - deposit, // > 0: ya sacaste más de lo que metiste
+    net: round2(withdraw - deposit), // > 0: ya sacaste más de lo que metiste
     monthDeposit: sum(month, "deposit"),
     monthWithdraw: sum(month, "withdraw"),
     biggestWithdraw: withdrawals.length ? Math.max(...withdrawals.map((m) => m.amount)) : 0,

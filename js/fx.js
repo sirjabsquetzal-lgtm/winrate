@@ -10,7 +10,8 @@ export function animateNumber(from, to, onStep, duration = 650) {
   const ease = (t) => 1 - Math.pow(1 - t, 3);
   const tick = (now) => {
     const t = Math.min(1, (now - t0) / duration);
-    onStep(Math.round(from + (to - from) * ease(t)));
+    // pasos intermedios a 2 decimales; el último es el valor exacto
+    onStep(t < 1 ? Math.round((from + (to - from) * ease(t)) * 100) / 100 : to);
     if (t < 1) requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);

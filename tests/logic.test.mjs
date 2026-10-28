@@ -162,7 +162,7 @@ test("TIE con comisión: cambia el capital pero sigue siendo empate", () => {
   assert.equal(L.winRate(s.records).ties, 2);
   assert.equal(L.lockStatus(s.records, at(2026, 10, 26, 12)).lives, 2);
   assert.equal(L.recordResult(s, "tie", at(2026, 10, 26, 12), -1000).reason, "exceeds");
-  assert.equal(L.recordResult(s, "tie", at(2026, 10, 26, 12), 1.5).reason, "amount");
+  assert.equal(L.recordResult(s, "tie", at(2026, 10, 26, 12), 1.555).reason, "amount");
   assert.equal(L.validateImport(JSON.parse(L.exportState(s))).ok, true);
 });
 test("TIE no rompe ni suma rachas", () => {
@@ -189,7 +189,7 @@ test("LOSE con cantidad real; límites", () => {
   assert.deepEqual([r.record.expected, r.record.delta, r.record.capitalAfter], [-50, -52, 948]);
   assert.equal(L.recordResult(s, "lose", at(2026, 10, 26, 10), 1001).reason, "exceeds");
   assert.equal(L.recordResult(s, "win", at(2026, 10, 26, 10), 0).reason, "amount");
-  assert.equal(L.recordResult(s, "win", at(2026, 10, 26, 10), 2.5).reason, "amount");
+  assert.equal(L.recordResult(s, "win", at(2026, 10, 26, 10), 2.555).reason, "amount");
   assert.equal(L.recordResult(s, "lose", at(2026, 10, 26, 10), -3).reason, "amount");
 });
 test("sin cantidad usa la calculada (compatibilidad)", () => {
@@ -207,6 +207,40 @@ test("import valida empates y signos", () => {
   bad.records[1].delta = -5; // WIN con delta negativo
   bad.records[1].capitalAfter = bad.records[1].capitalBefore - 5;
   assert.equal(L.validateImport(bad).ok, false);
+});
+
+console.log("Decimales (2)");
+test("parseMoney acepta punto o coma y máx. 2 decimales", () => {
+  assert.equal(L.parseMoney("4.98"), 4.98);
+  assert.equal(L.parseMoney("4,98"), 4.98);
+  assert.equal(L.parseMoney("120"), 120);
+  assert.equal(L.parseMoney("0.5"), 0.5);
+  assert.ok(Number.isNaN(L.parseMoney("4.985")));
+  assert.ok(Number.isNaN(L.parseMoney("-3")));
+  assert.ok(Number.isNaN(L.parseMoney("abc")));
+  assert.ok(Number.isNaN(L.parseMoney("")));
+});
+test("WIN de 4.98 con capital 50 (caso real)", () => {
+  const s = withSettings({ capital: 50, bullets: 20, ratio: 2.5 });
+  const p = L.calcProjection(50, 20, 2.5);
+  assert.deepEqual([p.invested, p.gain], [2, 5]);
+  const r = L.recordResult(s, "win", at(2026, 10, 28, 11), 4.98);
+  assert.equal(r.ok, true);
+  assert.deepEqual([r.record.expected, r.record.delta, r.record.capitalAfter], [5, 4.98, 54.98]);
+});
+test("sumas sin errores de punto flotante", () => {
+  let s = withSettings({ capital: 100.1, bullets: 10 });
+  for (let i = 0; i < 10; i++) s = L.recordResult(s, "tie", at(2026, 10, 28, 7 + i), -0.1).state;
+  assert.equal(s.settings.capital, 99.1);
+  assert.equal(L.sumDelta(s.records), -1);
+  s = L.recordResult(s, "lose", at(2026, 10, 28, 20), 0.3).state;
+  assert.equal(s.settings.capital, 98.8);
+  const v = L.validateImport(JSON.parse(L.exportState(s)));
+  assert.equal(v.ok, true);
+  assert.deepEqual(v.state, s);
+});
+test("capital con decimales en la calculadora", () => {
+  assert.deepEqual(L.calcProjection(54.98, 20, 2.5), { invested: 2, gain: 5, winCapital: 59.98, loss: 2, loseCapital: 52.98 });
 });
 
 console.log("Abonos y retiros");
@@ -228,7 +262,8 @@ test("retiro mayor al capital y montos inválidos se rechazan", () => {
   assert.equal(L.recordMovement(s, "withdraw", 100, at(2026, 10, 26, 10)).ok, true);
   assert.equal(L.recordMovement(s, "deposit", 0, at(2026, 10, 26, 10)).reason, "amount");
   assert.equal(L.recordMovement(s, "deposit", -5, at(2026, 10, 26, 10)).reason, "amount");
-  assert.equal(L.recordMovement(s, "deposit", 2.5, at(2026, 10, 26, 10)).reason, "amount");
+  assert.equal(L.recordMovement(s, "deposit", 2.555, at(2026, 10, 26, 10)).reason, "amount"); // máx. 2 decimales
+  assert.equal(L.recordMovement(s, "withdraw", 99.99, at(2026, 10, 26, 10)).state.settings.capital, 0.01);
 });
 test("los movimientos no afectan win rate, rachas ni bloqueo", () => {
   let s = withSettings({ capital: 1000 });
@@ -312,7 +347,7 @@ test("rachas, drawdown, mejor/peor día, promedios", () => {
   assert.deepEqual(bw.worst, { dayKey: "2026-10-03", net: -245 });
   const av = L.averages(s.records);
   assert.equal(av.day.periods, 4);
-  assert.equal(av.day.avg, Math.round(261 / 4));
+  assert.equal(av.day.avg, 65.25); // 261 / 4
   assert.equal(av.month.periods, 1);
   assert.equal(av.month.avg, 261);
   const wr = L.winRate(s.records);
