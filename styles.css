@@ -831,3 +831,10 @@ button { cursor: pointer; touch-action: manipulation; }
 .drawer-note.warn-note { color: var(--red); }
 .seg .chip:disabled { opacity: .4; cursor: not-allowed; }
 .lock-panel.goal .lock-icon svg { color: var(--red); }
+
+/* Barra de stop loss: plateada (la de meta es roja) */
+.stop-row .goal-fill { background: repeating-linear-gradient(90deg, var(--silver) 0 6px, var(--silver-dim) 6px 8px); box-shadow: none; }
+.stop-row.done .goal-fill { background: repeating-linear-gradient(90deg, var(--red) 0 6px, var(--red-deep) 6px 8px); }
+
+/* Que nada se aplaste cuando Settings no cabe en pantalla (hace scroll) */
+.drawer-body > * { flex-shrink: 0; }

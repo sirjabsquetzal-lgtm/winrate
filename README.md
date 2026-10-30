@@ -68,6 +68,16 @@ En **⚙ → CONTROL DE GANANCIA** se activa un tope de ganancia diaria (por def
 - Cuando hay **al menos 1 WIN** y el avance llega a la meta, sale el pop-up **TARGET REACHED** y se bloquean WIN / TIE / LOSE hasta las **06:00** (con cuenta regresiva). Abonar y retirar sí se permite.
 - Con la meta cumplida no se puede apagar el control ni cambiar el % hasta el día siguiente. **UNDO** del registro que cumplió la meta quita el bloqueo.
 
+## Control de pérdida (stop loss diario)
+
+Igual que la meta, pero en pérdida: **⚙ → CONTROL DE PERDIDA** con **LIMITE DIARIO (%)** (por defecto **10 %**).
+
+- Misma base (capital al empezar la primera ronda del día) y mismo avance (solo rondas; abonos y retiros no cuentan).
+- Con el control activo aparece en Calculator la barra **STOP HOY** (`−6.0% / −10%`), que se llena conforme el día baja.
+- Con **al menos 1 LOSE** y el día en **−límite o menos** (las comisiones de TIE también suman), sale el pop-up **STOP LOSS** y se bloquean WIN / TIE / LOSE hasta las **06:00**. Abonar y retirar sí se permite.
+- Con el límite alcanzado no se puede apagar ni cambiar hasta el día siguiente. **UNDO** quita el bloqueo.
+- Si en el mismo día se cumplen varios bloqueos, el panel muestra el de mayor prioridad: **2 pérdidas** > **stop loss** > **meta**.
+
 ## Abonos y retiros
 
 En **Calculator**, debajo del capital, hay dos botones:

@@ -60,6 +60,7 @@ function applyTheme() {
   document.querySelectorAll("[data-theme-opt]").forEach((b) => b.classList.toggle("is-active", b.dataset.themeOpt === th));
   document.querySelectorAll("[data-sound-opt]").forEach((b) => b.classList.toggle("is-active", (b.dataset.soundOpt === "on") === state.settings.sound));
   renderGoalSettings();
+  renderStopSettings();
   setSoundEnabled(state.settings.sound);
   if (activeTab === "stats") renderStats();
 }
@@ -83,9 +84,28 @@ function renderGoalSettings() {
       : "Apagado. Actívalo para que la app te detenga al llegar a tu meta diaria.";
 }
 
+function renderStopSettings() {
+  const s = state.settings;
+  const stopLocked = lockStatus(state.records, Date.now(), s).reason === "stop";
+  document.querySelectorAll("[data-stop-opt]").forEach((b) => {
+    b.classList.toggle("is-active", (b.dataset.stopOpt === "on") === s.lossControl);
+    // con el límite alcanzado no se puede apagar hasta mañana
+    b.disabled = stopLocked && b.dataset.stopOpt === "off";
+  });
+  if (document.activeElement !== $("inStop")) $("inStop").value = s.lossLimit;
+  $("inStop").disabled = stopLocked;
+  $("stopNote").classList.toggle("warn-note", stopLocked);
+  $("stopNote").textContent = stopLocked
+    ? "Límite de pérdida alcanzado hoy: el control se puede apagar o cambiar después de las 06:00."
+    : s.lossControl
+      ? `Al perder ${s.lossLimit}% del capital con que empezaste el día (con al menos 1 LOSE), se bloquea el registro hasta las 06:00.`
+      : "Apagado. Actívalo para que la app te detenga al llegar a tu pérdida máxima del día.";
+}
+
 function setGoal(patch) {
   commit({ ...state, settings: { ...state.settings, ...patch } });
   renderGoalSettings();
+  renderStopSettings();
   renderCalc({ syncInputs: false });
   if (activeTab === "stats") renderStats();
 }
@@ -154,7 +174,7 @@ function renderHearts(lock, animateLoss = false) {
   $("hearts").setAttribute("aria-label", `${lock.lives} de ${MAX_LOSSES_PER_DAY} vidas`);
 }
 
-const lockSig = (l) => [l.locked, l.lives, l.dayKey, l.reason, l.goal.active, l.goal.net, l.goal.target].join("|");
+const lockSig = (l) => [l.locked, l.lives, l.dayKey, l.reason, l.goal.active, l.goal.net, l.goal.target, l.stop.active, l.stop.limit].join("|");
 const pctLabel = (p) => (p > 0 ? "+" : p < 0 ? "−" : "") + Math.abs(p).toFixed(1) + "%";
 
 function renderLock(animateLoss = false) {
@@ -164,18 +184,21 @@ function renderLock(animateLoss = false) {
   if (changed || animateLoss) renderHearts(lock, animateLoss);
   $("dayLabel").textContent = "DÍA " + dayLabel(lock.dayKey);
   renderGoalRow(lock.goal);
+  renderStopRow(lock.stop);
   $("lockPanel").hidden = !lock.locked;
   document.querySelector(".final").classList.toggle("locked", lock.locked);
   if (lock.locked && changed) {
     const isGoal = lock.reason === "goal";
-    const title = isGoal ? "TARGET REACHED" : "SYSTEM LOCKED";
+    const title = { goal: "TARGET REACHED", stop: "STOP LOSS" }[lock.reason] || "SYSTEM LOCKED";
     $("lockPanel").classList.toggle("goal", isGoal);
     $("lockIcon").innerHTML = pixelSvg(isGoal ? "trophy" : "lock");
     $("lockTitle").textContent = title;
     $("lockTitle").dataset.text = title;
     $("lockReason").textContent = isGoal
       ? `Meta de +${lock.goal.target}% cumplida: ${signed(lock.goal.net)} Coins (${pctLabel(lock.goal.pct)})`
-      : "Límite diario de 2 pérdidas alcanzado";
+      : lock.reason === "stop"
+        ? `Límite de −${lock.stop.limit}% alcanzado: ${signed(lock.stop.net)} Coins (${pctLabel(lock.stop.pct)})`
+        : "Límite diario de 2 pérdidas alcanzado";
   }
   if (lock.locked) updateCountdown();
   return changed;
@@ -188,6 +211,16 @@ function renderGoalRow(goal) {
   $("goalFill").style.width = progress + "%";
   $("goalText").textContent = `${pctLabel(goal.pct)} / ${goal.target}%`;
   $("goalRow").classList.toggle("done", goal.reached);
+}
+
+// Barra de pérdida: se llena conforme el día baja hacia el límite
+function renderStopRow(stop) {
+  $("stopRow").hidden = !stop.active;
+  if (!stop.active) return;
+  const progress = stop.limit > 0 ? Math.max(0, Math.min(100, (-stop.pct / stop.limit) * 100)) : 0;
+  $("stopFill").style.width = progress + "%";
+  $("stopText").textContent = `${pctLabel(stop.pct)} / −${stop.limit}%`;
+  $("stopRow").classList.toggle("done", stop.reached);
 }
 
 function updateCountdown() {
@@ -337,20 +370,21 @@ async function onResult(result) {
       burst(innerWidth / 2, innerHeight / 3, [cs.getPropertyValue("--red").trim(), "#ffffff", "#c9ced8"], 120);
     }, 450);
   } else if (result === "tie") {
-    sfx.tie();
+    if (res.scenario === "stop") { shake(); sfx.lock(); }
+    else sfx.tie();
     if (res.scenario === "goal") flash();
   } else {
     shake();
-    if (res.scenario === "lock") sfx.lock();
+    if (res.scenario === "lock" || res.scenario === "stop") sfx.lock();
     else sfx.lose();
   }
 
   const scenario = res.scenario;
   const idx = pickPhraseIndex(scenario, lastPhrase[scenario]);
   lastPhrase[scenario] = idx;
-  const tags = { goal: `TARGET REACHED · ${pctLabel(lastLock.goal.pct)}`, win: "ROUND WIN", tie: "ROUND TIE", lose1: "ROUND LOST · 1 VIDA", lock: "GAME OVER · SYSTEM LOCKED" };
+  const tags = { goal: `TARGET REACHED · ${pctLabel(lastLock.goal.pct)}`, stop: `STOP LOSS · ${pctLabel(lastLock.stop.pct)}`, win: "ROUND WIN", tie: "ROUND TIE", lose1: "ROUND LOST · 1 VIDA", lock: "GAME OVER · SYSTEM LOCKED" };
   await openModal({
-    variant: { win: "win", goal: "win", tie: "tie", lock: "lock" }[scenario] || "lose",
+    variant: { win: "win", goal: "win", tie: "tie", lock: "lock", stop: "lock" }[scenario] || "lose",
     tag: tags[scenario],
     big: signed(res.record.delta) + " COINS",
     text: PHRASES[scenario][idx],
@@ -358,7 +392,7 @@ async function onResult(result) {
     sub: `Capital: ${fmt(res.record.capitalAfter)} Coins`,
     buttons: [{ label: "CONTINUAR", value: true, primary: true }],
   });
-  if (scenario === "lock" || scenario === "goal") $("lockPanel").scrollIntoView({ block: "center", behavior: "smooth" });
+  if (scenario === "lock" || scenario === "goal" || scenario === "stop") $("lockPanel").scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 // ---------------- Abonar / retirar ----------------
@@ -713,6 +747,7 @@ function openModal({ variant = "", tag = "", big = "", text = "", typewriter = f
 function openSettings() {
   sfx.click();
   renderGoalSettings();
+  renderStopSettings();
   $("inName").value = state.settings.playerName;
   $("settings").classList.add("open");
   $("settings").setAttribute("aria-hidden", "false");
@@ -908,6 +943,18 @@ function init() {
     if (ok) setGoal({ profitTarget: Math.round(n * 100) / 100 });
   });
   $("inGoal").addEventListener("blur", () => { $("inGoal").classList.remove("invalid"); renderGoalSettings(); });
+  document.querySelectorAll("[data-stop-opt]").forEach((b) => b.addEventListener("click", () => {
+    if (b.disabled) return;
+    sfx.click();
+    setGoal({ lossControl: b.dataset.stopOpt === "on" });
+  }));
+  $("inStop").addEventListener("input", () => {
+    const n = Number($("inStop").value.replace(",", "."));
+    const ok = Number.isFinite(n) && n > 0 && n <= 100;
+    $("inStop").classList.toggle("invalid", !ok);
+    if (ok) setGoal({ lossLimit: Math.round(n * 100) / 100 });
+  });
+  $("inStop").addEventListener("blur", () => { $("inStop").classList.remove("invalid"); renderStopSettings(); });
   $("btnExport").addEventListener("click", exportData);
   $("btnImport").addEventListener("click", () => { sfx.click(); $("fileImport").click(); });
   $("fileImport").addEventListener("change", (e) => {

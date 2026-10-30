@@ -104,7 +104,7 @@ test("undo desbloquea y restaura capital", () => {
 
 console.log("Frases");
 test("nunca repite la misma frase dos veces seguidas", () => {
-  for (const sc of ["win", "tie", "goal", "lose1", "lock"]) {
+  for (const sc of ["win", "tie", "goal", "stop", "lose1", "lock"]) {
     assert.equal(L.PHRASES[sc].length, 5);
     let last;
     for (let i = 0; i < 500; i++) {
@@ -265,6 +265,66 @@ test("settings de meta se validan al importar", () => {
   assert.deepEqual([st.profitLock, st.profitTarget], [true, 15]);
   const bad = L.sanitizeSettings({ profitLock: "si", profitTarget: -3 });
   assert.deepEqual([bad.profitLock, bad.profitTarget], [false, 10]);
+});
+
+console.log("Control de pérdida (stop loss diario)");
+const stopSettings = (over = {}) => withSettings({ capital: 1000, bullets: 20, ratio: 2, lossControl: true, lossLimit: 10, ...over });
+test("desactivado: no bloquea por % de pérdida", () => {
+  let s = stopSettings({ lossControl: false });
+  s = L.recordResult(s, "lose", at(2026, 10, 30, 10), 150).state;
+  assert.equal(L.lockStatus(s.records, at(2026, 10, 30, 11), s.settings).locked, false);
+});
+test("LOSE que llega a −10% bloquea con escenario stop (antes de gastar las 2 vidas)", () => {
+  let s = stopSettings();
+  const r = L.recordResult(s, "lose", at(2026, 10, 30, 10), 100); // −10% exacto, 1 sola pérdida
+  assert.equal(r.scenario, "stop"); s = r.state;
+  const lock = L.lockStatus(s.records, at(2026, 10, 30, 11), s.settings);
+  assert.deepEqual([lock.locked, lock.reason, lock.lives, lock.stop.net, lock.stop.limitCoins], [true, "stop", 1, -100, 100]);
+  for (const res of ["win", "lose", "tie"]) assert.equal(L.recordResult(s, res, at(2026, 10, 30, 12)).reason, "locked");
+  assert.equal(L.lockStatus(s.records, at(2026, 10, 31, 6, 0), s.settings).locked, false);
+});
+test("arriba del límite no bloquea; un WIN previo compensa", () => {
+  let s = stopSettings();
+  s = L.recordResult(s, "win", at(2026, 10, 30, 10), 50).state;   // +50
+  s = L.recordResult(s, "lose", at(2026, 10, 30, 11), 140).state; // −90 neto = −9%
+  const l = L.lockStatus(s.records, at(2026, 10, 30, 12), s.settings);
+  assert.equal(l.locked, false);
+  assert.ok(Math.abs(l.stop.pct + 9) < 1e-9);
+});
+test("comisión de TIE puede completar el stop si ya hubo un LOSE", () => {
+  let s = stopSettings();
+  s = L.recordResult(s, "lose", at(2026, 10, 30, 10), 98).state;  // −9.8%
+  const r = L.recordResult(s, "tie", at(2026, 10, 30, 11), -2);   // −10%
+  assert.equal(r.scenario, "stop");
+});
+test("sin LOSE no se activa (solo comisiones de TIE)", () => {
+  let s = stopSettings();
+  s = L.recordResult(s, "tie", at(2026, 10, 30, 10), -150).state;
+  assert.equal(L.lockStatus(s.records, at(2026, 10, 30, 11), s.settings).locked, false);
+});
+test("abonos y retiros no cuentan; UNDO desbloquea", () => {
+  let s = stopSettings();
+  s = L.recordMovement(s, "withdraw", 900, at(2026, 10, 30, 9)).state;
+  s = L.recordResult(s, "lose", at(2026, 10, 30, 10), 5).state;   // base 100 → −5%
+  assert.equal(L.lockStatus(s.records, at(2026, 10, 30, 11), s.settings).locked, false);
+  s = L.recordResult(s, "lose", at(2026, 10, 30, 11), 5).state;   // 2ª pérdida → motivo "losses"
+  assert.equal(L.lockStatus(s.records, at(2026, 10, 30, 12), s.settings).reason, "losses");
+  let t = stopSettings({ lossLimit: 5 });
+  t = L.recordResult(t, "lose", at(2026, 10, 30, 10), 50).state;
+  assert.equal(L.lockStatus(t.records, at(2026, 10, 30, 11), t.settings).reason, "stop");
+  t = L.undoLast(t).state;
+  assert.equal(L.lockStatus(t.records, at(2026, 10, 30, 11), t.settings).locked, false);
+});
+test("prioridad: 2 pérdidas > stop > meta", () => {
+  let s = stopSettings({ lossLimit: 1 });
+  s = L.recordResult(s, "lose", at(2026, 10, 30, 10)).state; // −5% → stop
+  assert.equal(L.lockStatus(s.records, at(2026, 10, 30, 11), s.settings).reason, "stop");
+});
+test("settings de stop loss se validan", () => {
+  const ok = L.sanitizeSettings({ lossControl: true, lossLimit: 7.5 });
+  assert.deepEqual([ok.lossControl, ok.lossLimit], [true, 7.5]);
+  const bad = L.sanitizeSettings({ lossControl: 1, lossLimit: 150 });
+  assert.deepEqual([bad.lossControl, bad.lossLimit], [false, 10]);
 });
 
 console.log("Decimales (2)");

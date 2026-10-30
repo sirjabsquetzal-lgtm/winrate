@@ -3,10 +3,11 @@
 // v2: agrega `movements` (abonos y retiros) · v3: resultado "tie" y `expected` (cantidad calculada) en cada ronda
 export const SCHEMA_VERSION = 3;
 export const SUPPORTED_SCHEMAS = [1, 2, 3];
-export const APP_VERSION = "1.4.0";
+export const APP_VERSION = "1.5.0";
 export const MAX_LOSSES_PER_DAY = 2;
 export const DAY_START_HOUR = 6;
 export const DEFAULT_PROFIT_TARGET = 10; // % de ganancia diaria para el control de ganancia
+export const DEFAULT_LOSS_LIMIT = 10; // % de pérdida diaria para el control de pérdida (stop loss)
 export const RATIO_PRESETS = ["1.5", "2", "3"];
 
 const HOUR = 3600 * 1000;
@@ -25,6 +26,8 @@ export function defaultSettings() {
     customRatio: null,
     profitLock: false, // control de ganancia: bloquea el día al llegar a la meta
     profitTarget: DEFAULT_PROFIT_TARGET,
+    lossControl: false, // control de pérdida: bloquea el día al llegar al límite de pérdida
+    lossLimit: DEFAULT_LOSS_LIMIT,
   };
 }
 
@@ -171,22 +174,39 @@ export function dayGoal(records, key, settings = {}) {
 }
 
 /**
- * Estado de bloqueo del día. reason: "losses" (2 pérdidas) tiene prioridad sobre "goal" (meta de ganancia cumplida).
- * `settings` es opcional: sin él solo aplica el límite de pérdidas.
+ * Límite de pérdida del día (stop loss), espejo de dayGoal: misma base y mismo avance.
+ * Se activa con ≥ 1 LOSE y avance ≤ −límite.
+ */
+export function dayStop(records, key, settings = {}) {
+  const limit = isNum(settings.lossLimit) && settings.lossLimit > 0 ? settings.lossLimit : DEFAULT_LOSS_LIMIT;
+  const recs = dayRecords(records, key);
+  const base = recs.length ? recs[0].capitalBefore : null;
+  const net = sumDelta(recs);
+  const losses = recs.filter((r) => r.result === "lose").length;
+  const pct = base > 0 ? (net / base) * 100 : 0;
+  const active = settings.lossControl === true;
+  return { active, limit, base, net, losses, pct, limitCoins: base > 0 ? round2((base * limit) / 100) : null, reached: active && losses >= 1 && pct <= -limit + 1e-9 };
+}
+
+/**
+ * Estado de bloqueo del día. Prioridad del motivo: "losses" (2 pérdidas) > "stop" (límite de pérdida %) > "goal" (meta de ganancia).
+ * `settings` es opcional: sin él solo aplica el límite de 2 pérdidas.
  */
 export function lockStatus(records, now, settings = {}) {
   const key = dayKey(now);
   const losses = lossesOnDay(records, key);
   const goal = dayGoal(records, key, settings);
+  const stop = dayStop(records, key, settings);
   const lossLock = losses >= MAX_LOSSES_PER_DAY;
-  const locked = lossLock || goal.reached;
+  const locked = lossLock || stop.reached || goal.reached;
   return {
     dayKey: key,
     losses,
     lives: Math.max(0, MAX_LOSSES_PER_DAY - losses),
     locked,
-    reason: lossLock ? "losses" : goal.reached ? "goal" : null,
+    reason: lossLock ? "losses" : stop.reached ? "stop" : goal.reached ? "goal" : null,
     goal,
+    stop,
     unlockAt: locked ? nextReset(now) : null,
   };
 }
@@ -252,7 +272,9 @@ export function recordResult(state, result, now, amount) {
   const records = [...state.records, record];
   const next = { ...state, settings: { ...s, capital: record.capitalAfter }, records };
   let scenario = result;
-  if (result === "lose") scenario = lossesOnDay(records, record.dayKey) >= MAX_LOSSES_PER_DAY ? "lock" : "lose1";
+  if (lossesOnDay(records, record.dayKey) >= MAX_LOSSES_PER_DAY && result === "lose") scenario = "lock";
+  else if (dayStop(records, record.dayKey, s).reached) scenario = "stop"; // esta ronda llegó al límite de pérdida
+  else if (result === "lose") scenario = "lose1";
   else if (dayGoal(records, record.dayKey, s).reached) scenario = "goal"; // esta ronda cumplió la meta del día
   return { ok: true, state: next, record, scenario };
 }
@@ -329,6 +351,13 @@ export const PHRASES = {
     "Sistema en pausa. Los mejores jugadores saben cuándo parar.",
     "Hoy se protege el capital. Sal a vivir, mañana hay revancha.",
     "Límite alcanzado. Apaga la pantalla, el mercado sigue mañana.",
+  ],
+  stop: [
+    "Stop loss activado. Hoy se protege lo que queda; mañana se recupera con calma.",
+    "Límite de pérdida alcanzado. Parar a tiempo también es ganar.",
+    "Hasta aquí por hoy. El capital que conservas es tu próxima oportunidad.",
+    "Freno de mano activado. Respira, desconecta y vuelve mañana.",
+    "Día cerrado en rojo, pero bajo control. Los pros saben cortar pérdidas.",
   ],
   goal: [
     "¡Meta del día cumplida! Guarda las Coins y ve a disfrutar.",
@@ -412,6 +441,8 @@ export function sanitizeSettings(s) {
   if (s.customRatio === null || (isNum(s.customRatio) && s.customRatio > 0)) out.customRatio = s.customRatio;
   if (typeof s.profitLock === "boolean") out.profitLock = s.profitLock;
   if (isNum(s.profitTarget) && s.profitTarget > 0 && s.profitTarget <= 1000) out.profitTarget = s.profitTarget;
+  if (typeof s.lossControl === "boolean") out.lossControl = s.lossControl;
+  if (isNum(s.lossLimit) && s.lossLimit > 0 && s.lossLimit <= 100) out.lossLimit = s.lossLimit;
   return out;
 }
 

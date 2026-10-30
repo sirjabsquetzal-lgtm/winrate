@@ -50,6 +50,11 @@
           <div class="goal-track"><div id="goalFill" class="goal-fill"></div></div>
           <span id="goalText" class="goal-text">+0% / 10%</span>
         </div>
+        <div id="stopRow" class="goal-row stop-row" hidden>
+          <span class="lbl">STOP HOY</span>
+          <div class="goal-track"><div id="stopFill" class="goal-fill"></div></div>
+          <span id="stopText" class="goal-text">0% / −10%</span>
+        </div>
 
         <div class="hud panel capital-panel">
           <label class="lbl" for="inCapital">CAPITAL <span class="unit">(COINS)</span></label>
@@ -253,6 +258,17 @@
         <input id="inGoal" class="text-input" type="text" inputmode="decimal" autocomplete="off" />
       </div>
       <div id="goalNote" class="drawer-note"></div>
+
+      <div class="lbl">CONTROL DE PERDIDA</div>
+      <div class="seg" id="segStop">
+        <button class="chip" data-stop-opt="on">ON</button>
+        <button class="chip" data-stop-opt="off">OFF</button>
+      </div>
+      <div class="goal-target">
+        <label class="lbl" for="inStop">LIMITE DIARIO (%)</label>
+        <input id="inStop" class="text-input" type="text" inputmode="decimal" autocomplete="off" />
+      </div>
+      <div id="stopNote" class="drawer-note"></div>
 
       <div class="lbl">DATOS</div>
       <button id="btnExport" class="btn-wide">EXPORTAR .JSON</button>
