@@ -886,7 +886,40 @@ function setupSW() {
       });
     });
     setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
+    // En el celular la PWA puede quedarse abierta días: revisa también cada vez que vuelve a primer plano
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) reg.update().catch(() => {}); });
+
+    // Botón manual en Settings
+    $("btnCheckUpdate").onclick = async () => {
+      sfx.click();
+      const btn = $("btnCheckUpdate");
+      btn.disabled = true;
+      btn.textContent = "BUSCANDO...";
+      try {
+        await reg.update();
+      } catch {
+        /* sin red: se informa abajo */
+      }
+      const pending = reg.waiting || reg.installing;
+      btn.disabled = false;
+      btn.textContent = "BUSCAR ACTUALIZACION";
+      if (pending) {
+        closeSettings();
+        if (reg.waiting) prompt(reg.waiting); // si está instalando, el aviso sale solo al terminar
+      } else {
+        showNote(navigator.onLine ? "YA TIENES LA ULTIMA VERSION" : "SIN CONEXION: INTENTA MAS TARDE");
+      }
+    };
   }).catch((e) => console.warn("[WinRate] SW:", e));
+}
+
+/** Aviso breve en el toast (sin botón). */
+function showNote(text) {
+  const t = $("toast");
+  t.innerHTML = `<span>${esc(text)}</span>`;
+  t.hidden = false;
+  clearTimeout(showNote.timer);
+  showNote.timer = setTimeout(() => (t.hidden = true), 2500);
 }
 
 // ---------------- Init ----------------

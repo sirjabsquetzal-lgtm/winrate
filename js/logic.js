@@ -3,7 +3,7 @@
 // v2: agrega `movements` (abonos y retiros) · v3: resultado "tie" y `expected` (cantidad calculada) en cada ronda
 export const SCHEMA_VERSION = 3;
 export const SUPPORTED_SCHEMAS = [1, 2, 3];
-export const APP_VERSION = "1.5.0";
+export const APP_VERSION = "1.5.1";
 export const MAX_LOSSES_PER_DAY = 2;
 export const DAY_START_HOUR = 6;
 export const DEFAULT_PROFIT_TARGET = 10; // % de ganancia diaria para el control de ganancia

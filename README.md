@@ -35,6 +35,7 @@ node tests/e2e.cjs && node tests/pwa-offline.cjs && node tests/screenshots.cjs
 3. En el repo ve a **Settings → Pages**. En *Build and deployment* elige **Source: Deploy from a branch**, **Branch: `main`** y carpeta **`/ (root)`**, y clic en **Save**.
 4. Espera de 1 a 2 minutos. La URL será `https://<TU_USUARIO>.github.io/winrate/`. Pages sirve por HTTPS, que es obligatorio para el service worker.
 5. **Para publicar cambios después:** sube los archivos nuevos y **cambia `CACHE_VERSION` en `sw.js`** (por ejemplo `winrate-v1.0.1`). Al abrir la app aparecerá *NUEVA VERSION DISPONIBLE → ACTUALIZAR*.
+   Los celulares buscan actualización al abrir la app y al volver a ella; también hay un botón **⚙ → BUSCAR ACTUALIZACION**. La versión instalada se ve al final de Settings.
 
 > Todas las rutas son relativas, así que funciona en la subcarpeta `/winrate/` sin tocar nada.
 

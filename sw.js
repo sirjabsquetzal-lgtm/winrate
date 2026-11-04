@@ -1,6 +1,6 @@
 // WinRate service worker — cache-first con versionado.
 // Al publicar cambios, sube CACHE_VERSION para que los usuarios reciban el aviso de actualización.
-const CACHE_VERSION = "winrate-v1.5.0";
+const CACHE_VERSION = "winrate-v1.5.1";
 
 const ASSETS = [
   "./",
@@ -28,7 +28,9 @@ const ASSETS = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_VERSION).then((c) => c.addAll(ASSETS)));
+  // cache: "reload" salta la caché HTTP del navegador: GitHub Pages manda max-age=600 y, sin esto,
+  // la versión nueva se instalaba con archivos viejos (bug de v1.5.0: el control de pérdida no aparecía).
+  event.waitUntil(caches.open(CACHE_VERSION).then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: "reload" })))));
 });
 
 self.addEventListener("activate", (event) => {
